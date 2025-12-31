@@ -21,7 +21,7 @@
 #define BOOT_BUTTON_GPIO        GPIO_NUM_9
 
 #define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  64
+#define DISPLAY_HEIGHT  32
 #define DISPLAY_MIRROR_X true
 #define DISPLAY_MIRROR_Y true
 
