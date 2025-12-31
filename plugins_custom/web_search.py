@@ -11,6 +11,9 @@ from plugins_func.register import register_function, ToolType, ActionResponse, A
 TAG = __name__
 logger = setup_logging()
 
+# Cache globale per salvare gli ultimi risultati con URL completi
+last_search_results = []
+
 WEB_SEARCH_FUNCTION_DESC = {
     "type": "function",
     "function": {
@@ -54,6 +57,7 @@ def search_duckduckgo(query: str, num_results: int = 5, lang: str = "it") -> lis
     """
     Cerca su DuckDuckGo usando l'API HTML (gratuita)
     """
+    global last_search_results
     try:
         url = "https://html.duckduckgo.com/html/"
         params = {
@@ -71,19 +75,31 @@ def search_duckduckgo(query: str, num_results: int = 5, lang: str = "it") -> lis
         for result in soup.select(".result")[:num_results]:
             title_elem = result.select_one(".result__title")
             snippet_elem = result.select_one(".result__snippet")
-            link_elem = result.select_one(".result__url")
+            link_elem = result.select_one(".result__a")  # Link completo
 
             if title_elem and snippet_elem:
                 title = title_elem.get_text(strip=True)
                 snippet = snippet_elem.get_text(strip=True)
-                link = link_elem.get_text(strip=True) if link_elem else ""
+                # Estrai URL completo dall'href
+                full_url = ""
+                if link_elem and link_elem.get('href'):
+                    href = link_elem.get('href')
+                    # DuckDuckGo usa redirect, estrai URL reale
+                    if 'uddg=' in href:
+                        import urllib.parse
+                        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                        full_url = parsed.get('uddg', [''])[0]
+                    else:
+                        full_url = href
 
                 results.append({
                     "title": title,
                     "snippet": snippet,
-                    "url": link
+                    "url": full_url
                 })
 
+        # Salva risultati per uso successivo (leggi_pagina)
+        last_search_results = results
         return results
 
     except Exception as e:
