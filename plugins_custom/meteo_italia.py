@@ -15,8 +15,9 @@ METEO_ITALIA_FUNCTION_DESC = {
     "function": {
         "name": "meteo_italia",
         "description": (
-            "Ottieni il meteo attuale e le previsioni per qualsiasi città italiana. "
-            "Funziona per tutte le città, anche piccole come Asti, Alessandria, Cuneo."
+            "获取意大利城市天气 / Ottieni il meteo per qualsiasi città italiana. "
+            "当用户询问意大利任何城市的天气时使用。"
+            "Use when user asks: 'che tempo fa a...', 'meteo...', 'weather in Italy...'"
         ),
         "parameters": {
             "type": "object",
