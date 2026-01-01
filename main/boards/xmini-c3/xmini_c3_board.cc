@@ -40,7 +40,6 @@ private:
     }
 
     void InitializeCodecI2c() {
-        // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_0,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
@@ -54,30 +53,9 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
-
-        // Scan I2C bus for all devices to help debug
-        ESP_LOGI(TAG, "Scanning I2C bus on SDA=%d SCL=%d...", AUDIO_CODEC_I2C_SDA_PIN, AUDIO_CODEC_I2C_SCL_PIN);
-        bool found_any = false;
-        for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-            if (i2c_master_probe(codec_i2c_bus_, addr, 100) == ESP_OK) {
-                ESP_LOGI(TAG, "I2C device found at address 0x%02X", addr);
-                found_any = true;
-            }
-        }
-        if (!found_any) {
-            ESP_LOGW(TAG, "No I2C devices found! Check wiring or try different I2C pins.");
-        }
-
-        // Check for ES8311 at 0x18 but do not block if not found
-        if (i2c_master_probe(codec_i2c_bus_, 0x18, 1000) != ESP_OK) {
-            ESP_LOGW(TAG, "ES8311 audio codec not found at 0x18, audio may not work");
-        } else {
-            ESP_LOGI(TAG, "ES8311 audio codec found at 0x18");
-        }
     }
 
     void InitializeSsd1306Display() {
-        // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
             .dev_addr = 0x3C,
             .on_color_trans_done = nullptr,
@@ -90,7 +68,7 @@ private:
                 .dc_low_on_data = 0,
                 .disable_control_phase = 0,
             },
-            .scl_speed_hz = 100 * 1000,  // Reduced from 400kHz to fix display artifacts
+            .scl_speed_hz = 400 * 1000,
         };
 
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
@@ -108,7 +86,6 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
         ESP_LOGI(TAG, "SSD1306 driver installed");
 
-        // Reset the display
         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
         if (esp_lcd_panel_init(panel_) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialize display");
@@ -116,7 +93,6 @@ private:
             return;
         }
 
-        // Set the display to on
         ESP_LOGI(TAG, "Turning display on");
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
@@ -161,9 +137,6 @@ public:
         InitializeButtons();
         InitializePowerSaveTimer();
         InitializeTools();
-
-        // 避免使用错误的固件，把 EFUSE 操作放在最后
-        // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
         esp_efuse_write_field_bit(ESP_EFUSE_VDD_SPI_AS_GPIO);
     }
 
