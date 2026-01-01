@@ -90,7 +90,7 @@ private:
                 .dc_low_on_data = 0,
                 .disable_control_phase = 0,
             },
-            .scl_speed_hz = 400 * 1000,
+            .scl_speed_hz = 100 * 1000,  // Reduced from 400kHz to fix display artifacts
         };
 
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));

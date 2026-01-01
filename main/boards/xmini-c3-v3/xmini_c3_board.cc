@@ -69,24 +69,17 @@ private:
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
 
-        // Scan I2C bus for all devices to help debug
-        ESP_LOGI(TAG, "Scanning I2C bus on SDA=%d SCL=%d...", AUDIO_CODEC_I2C_SDA_PIN, AUDIO_CODEC_I2C_SCL_PIN);
-        bool found_any = false;
+        // Scan I2C bus to find devices
+        ESP_LOGI(TAG, "Scanning I2C bus...");
         for (uint8_t addr = 0x08; addr < 0x78; addr++) {
             if (i2c_master_probe(codec_i2c_bus_, addr, 100) == ESP_OK) {
-                ESP_LOGI(TAG, "I2C device found at address 0x%02X", addr);
-                found_any = true;
+                ESP_LOGW(TAG, "I2C device found at address 0x%02X", addr);
             }
         }
-        if (!found_any) {
-            ESP_LOGW(TAG, "No I2C devices found! Check wiring or try different I2C pins.");
-        }
 
-        // Check for ES8311 at 0x18 but do not block if not found
+        // Check for ES8311 - continue even if not found
         if (i2c_master_probe(codec_i2c_bus_, 0x18, 1000) != ESP_OK) {
-            ESP_LOGW(TAG, "ES8311 audio codec not found at 0x18, audio may not work");
-        } else {
-            ESP_LOGI(TAG, "ES8311 audio codec found at 0x18");
+            ESP_LOGE(TAG, "ES8311 not found at 0x18. Continuing anyway...");
         }
     }
 
