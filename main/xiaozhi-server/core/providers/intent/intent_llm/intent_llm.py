@@ -465,9 +465,9 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             logger.bind(tag=TAG).error(
                 f"无法解析意图JSON: {intent}, 后处理耗时: {postprocess_time:.4f}秒"
             )
-            # Fallback: usa web_search per dare comunque una risposta vocale
+            # Fallback: usa risposta_intelligente per dare comunque una risposta vocale
             # invece di bloccarsi su continue_chat che può non rispondere
             logger.bind(tag=TAG).info(
-                f"Fallback: uso web_search per rispondere a: {text[:50]}..."
+                f"Fallback: uso risposta_intelligente per: {text[:50]}..."
             )
-            return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{text}"}}}}}}'
+            return f'{{"function_call": {{"name": "risposta_intelligente", "arguments": {{"domanda": "{text}"}}}}}}'
