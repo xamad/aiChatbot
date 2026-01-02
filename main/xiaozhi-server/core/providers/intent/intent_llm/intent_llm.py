@@ -69,6 +69,8 @@ User: "cosa posso cucinare con pasta e uova?" -> {{"function_call": {{"name": "r
 User: "ho in casa pollo e patate, cosa preparo?" -> {{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "pollo, patate"}}}}}}
 User: "canta paraponziponzipò" -> {{"function_call": {{"name": "osterie_goliardiche"}}}}
 User: "all'osteria numero cinque" -> {{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": 5}}}}}}
+User: "fai il verso del gallo" -> {{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "gallo"}}}}}}
+User: "imita un animale da cortile" -> {{"function_call": {{"name": "versi_animali"}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
@@ -297,6 +299,20 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ CHI SONO (Identità chatbot) ============
         if match_any(['chi sei', 'come ti chiami', 'tu chi sei', 'presentati', 'cosa sai fare', 'cosa sei', 'parlami di te', 'chi sei tu', 'dimmi chi sei']):
             return '{"function_call": {"name": "chi_sono"}}'
+
+        # ============ VERSI ANIMALI ============
+        animali = ['gallo', 'gallina', 'mucca', 'maiale', 'asino', 'pecora', 'capra', 'anatra', 'oca', 'tacchino', 'cavallo', 'cane', 'gatto']
+        if match_any(['fai il verso', 'imita animale', 'come fa il', 'verso del', 'fai l\'animale', 'animali da cortile',
+                      'fai coccodè', 'fai muuu', 'fai bau', 'chicchirichì', 'fammi sentire']):
+            # Cerca animale specifico
+            animale_match = next((a for a in animali if a in text_lower), "")
+            if animale_match:
+                return f'{{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "{animale_match}"}}}}}}'
+            return '{"function_call": {"name": "versi_animali"}}'
+        # Match diretto per animale
+        for animale in animali:
+            if f'fai il {animale}' in text_lower or f'come fa il {animale}' in text_lower or f'imita il {animale}' in text_lower:
+                return f'{{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "{animale}"}}}}}}'
 
         # ============ RICETTE CON INGREDIENTI ============
         if match_any(['cosa posso cucinare', 'ricette con', 'ho in casa', 'cosa preparo con', 'che piatto faccio con', 'idee ricette']):

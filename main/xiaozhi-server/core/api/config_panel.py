@@ -81,7 +81,7 @@ CATEGORIE_FUNZIONI = {
     "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "calcolatrice", "convertitore", "traduttore", "lista_spesa", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono"]},
     "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica"]},
     "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "check_benessere", "ginnastica_dolce", "conta_acqua"]},
-    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "sommario_funzioni", "intrattenitore_anziani", "complimenti"]},
+    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "sommario_funzioni", "intrattenitore_anziani", "complimenti"]},
     "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "numeri_utili"]},
     "ricerca": {"nome": "Ricerca", "icon": "🔍", "funzioni": ["web_search", "leggi_pagina"]},
 }
