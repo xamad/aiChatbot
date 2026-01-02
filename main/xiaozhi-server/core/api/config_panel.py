@@ -44,9 +44,12 @@ def auth_required():
         text='Autenticazione richiesta'
     )
 
-CONFIG_FILE = "/opt/xiaozhi-server/main/xiaozhi-server/data/.config.yaml"
-USER_PREFS_FILE = "/opt/xiaozhi-server/main/xiaozhi-server/data/user_preferences.json"
-FUNCTIONS_DIR = "/opt/xiaozhi-server/main/xiaozhi-server/plugins_func/functions"
+# Paths - funziona sia in Docker che in locale
+import pathlib
+_BASE_DIR = pathlib.Path(__file__).parent.parent.parent
+CONFIG_FILE = str(_BASE_DIR / "data" / ".config.yaml")
+USER_PREFS_FILE = str(_BASE_DIR / "data" / "user_preferences.json")
+FUNCTIONS_DIR = str(_BASE_DIR / "plugins_func" / "functions")
 
 # Voci disponibili Edge TTS (italiane)
 VOCI_DISPONIBILI = {
@@ -80,8 +83,8 @@ CATEGORIE_FUNZIONI = {
     "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale", "allenamento_mentale"]},
     "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore", "lista_spesa", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale"]},
     "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "hass_get_state", "hass_set_state"]},
-    "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino"]},
-    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata"]},
+    "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "compagno_antisolitudine", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino", "suoni_ambiente"]},
+    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata"]},
     "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
     "ricerca": {"nome": "Ricerca", "icon": "🔍", "funzioni": ["web_search", "leggi_pagina", "risposta_intelligente"]},
 }

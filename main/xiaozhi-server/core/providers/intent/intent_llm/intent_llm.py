@@ -306,6 +306,47 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['chi sei', 'come ti chiami', 'tu chi sei', 'presentati', 'cosa sai fare', 'cosa sei', 'parlami di te', 'chi sei tu', 'dimmi chi sei']):
             return '{"function_call": {"name": "chi_sono"}}'
 
+        # ============ PERSONALITÀ MULTIPLE ============
+        personalita_keywords = ['pirata', 'robot', 'nonno', 'maggiordomo', 'bambino', 'poeta',
+                               'complottista', 'nonna', 'filosofo', 'ubriaco', 'brillo', 'sbronzo']
+        if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'modalità', 'cambia personalità']):
+            for pers in personalita_keywords:
+                if pers in text_lower:
+                    return f'{{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "{pers}"}}}}}}'
+            return '{"function_call": {"name": "personalita_multiple"}}'
+        if match_any(['torna normale', 'basta personalità', 'smetti di fare']):
+            return '{"function_call": {"name": "personalita_multiple", "arguments": {"personalita": "normale"}}}'
+
+        # ============ COMPAGNO ANTI-SOLITUDINE ============
+        if match_any(['mi sento solo', 'fammi compagnia', 'sono triste', 'nessuno mi parla',
+                      'ho bisogno di compagnia', 'parliamo un po', 'tienimi compagnia', 'chiacchieriamo']):
+            return '{"function_call": {"name": "compagno_antisolitudine"}}'
+
+        # ============ EASTER EGG FOLLI ============
+        if match_any(['insultami', 'dimmi qualcosa di cattivo', 'offendimi']):
+            return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "insulto"}}}'
+        if match_any(['confessami', 'ho peccato', 'devo confessare']):
+            return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "confessione"}}}'
+        if match_any(['litiga con te stesso', 'fai casino', 'fai il pazzo']):
+            return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "litigio"}}}'
+        if match_any(['dimmi una profezia', 'predici il futuro', 'cosa mi succederà']):
+            return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "profezia"}}}'
+
+        # ============ SUONI AMBIENTE / ASMR ============
+        suoni_keywords = ['pioggia', 'temporale', 'onde', 'mare', 'foresta', 'bosco', 'camino',
+                         'fuoco', 'ruscello', 'vento', 'notte', 'grilli', 'rumore bianco',
+                         'battito', 'cuore', 'caffetteria', 'treno']
+        if match_any(['suoni rilassanti', 'rumore bianco', 'asmr', 'suoni natura',
+                      'aiutami a dormire', 'suoni per dormire', 'ambiente rilassante', 'suono del']):
+            for suono in suoni_keywords:
+                if suono in text_lower:
+                    return f'{{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "{suono}"}}}}}}'
+            return '{"function_call": {"name": "suoni_ambiente"}}'
+        # Match diretto suoni
+        for suono in suoni_keywords:
+            if f'suono {suono}' in text_lower or f'metti {suono}' in text_lower or f'fammi sentire {suono}' in text_lower:
+                return f'{{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "{suono}"}}}}}}'
+
         # ============ VERSI ANIMALI ============
         animali = ['gallo', 'gallina', 'mucca', 'maiale', 'asino', 'pecora', 'capra', 'anatra', 'oca', 'tacchino', 'cavallo', 'cane', 'gatto']
         if match_any(['fai il verso', 'imita animale', 'come fa il', 'verso del', 'fai l\'animale', 'animali da cortile',
