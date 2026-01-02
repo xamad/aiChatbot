@@ -286,9 +286,9 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['non riesco a dormire', 'insonnia', 'compagnia stanotte', 'ho incubi']):
             return '{"function_call": {"name": "compagno_notturno"}}'
 
-        # ============ CERCA MUSICA (YouTube) ============
-        if match_any(['suona', 'metti la canzone', 'cerca musica', 'fammi sentire', 'play music']):
-            return f'{{"function_call": {{"name": "cerca_musica", "arguments": {{"query": "{text}"}}}}}}'
+        # ============ CERCA MUSICA (YouTube) - DISABILITATO, usiamo solo radio ============
+        # if match_any(['suona', 'metti la canzone', 'cerca musica', 'fammi sentire', 'play music']):
+        #     return f'{{"function_call": {{"name": "cerca_musica", "arguments": {{"query": "{text}"}}}}}}'
 
         # ============ GUIDA TURISTICA ============
         if match_any(['guida turistica', 'cosa visitare', 'monumenti', 'turismo', 'luoghi da vedere']):

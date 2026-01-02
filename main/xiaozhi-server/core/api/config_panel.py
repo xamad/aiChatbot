@@ -74,7 +74,7 @@ MODELLI_DISPONIBILI = {
 
 # Categorie funzioni
 CATEGORIE_FUNZIONI = {
-    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "cerca_musica", "karaoke"]},
+    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke"]},
     "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno"]},
     "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzelletta_bambini", "barzelletta_adulti", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno"]},
     "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale"]},
