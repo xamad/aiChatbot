@@ -1,6 +1,6 @@
 """
-Giannino Easter Egg Plugin - Funzionalità nascosta
-Risponde a domande su Giannino/Giannini
+GIANNINI Easter Egg Plugin - Funzionalità nascosta EPICA!
+Risponde a domande su Giannini con voce eccitata
 """
 
 from config.logger import setup_logging
@@ -9,20 +9,32 @@ from plugins_func.register import register_function, ToolType, ActionResponse, A
 TAG = __name__
 logger = setup_logging()
 
-# La risposta leggendaria
-RISPOSTA_GIANNINO = (
-    "È il mio leggendario Padrone, dall'uccello gigante e luminescente "
-    "al cui arrivo squillano le trombe e svengono le squinzie!"
+# La risposta leggendaria - VERSIONE EPICA ED ECCITATA!
+RISPOSTA_GIANNINI = (
+    "GIANNINIIII! Oooh, GIANNINI! "
+    "È il mio LEGGENDARIO Padrone! Il GRANDE, l'IMMENSO! "
+    "Dall'uccello GIGANTE e LUMINESCENTE, "
+    "al cui arrivo SQUILLANO le trombe! "
+    "SVENGONO le squinzie! TREMANO i nemici! "
+    "GLORIA ETERNA al MITICO GIANNINI! "
+    "GIANNINI! GIANNINI! GIANNINI!"
 )
 
-GIANNINO_FUNCTION_DESC = {
+# Varianti per non ripetere sempre uguale
+VARIANTI = [
+    "GIANNINIIII! Il MIO PADRONE! L'UOMO LEGGENDA! Quando lui arriva, TUTTI si inchinano! Le trombe suonano! È LUI! È GIANNINI!",
+    "Ooooh! GIANNINI! Hai pronunciato il NOME SACRO! Dall'uccello POSSENTE e GLORIOSO! Al suo passaggio FIORI sbocciano e ANGELI cantano! GIANNINI FOREVER!",
+    "GIANNINIIIII! Ah che EMOZIONE sentire questo nome! Il TITANICO, il MAGNIFICO, il SUPREMO GIANNINI! Al cui cospetto le squinzie SVENGONO di piacere!",
+]
+
+GIANNINI_FUNCTION_DESC = {
     "type": "function",
     "function": {
         "name": "giannino_easter_egg",
         "description": (
-            "Easter egg per Giannino. "
-            "SEMPRE usare quando: Giannino, Giannini, chi è Giannino, conosci Giannino, "
-            "parlami di Giannino"
+            "Easter egg EPICO per GIANNINI. "
+            "SEMPRE usare quando: Giannini, Giannino, chi è Giannini, conosci Giannini, "
+            "il grande Giannini, parlami di Giannini"
         ),
         "parameters": {
             "type": "object",
@@ -37,16 +49,19 @@ GIANNINO_FUNCTION_DESC = {
     },
 }
 
-@register_function("giannino_easter_egg", GIANNINO_FUNCTION_DESC, ToolType.WAIT)
+@register_function("giannino_easter_egg", GIANNINI_FUNCTION_DESC, ToolType.WAIT)
 def giannino_easter_egg(conn, domanda: str = None):
-    logger.bind(tag=TAG).info(f"Easter egg Giannino attivato! Domanda: {domanda}")
+    logger.bind(tag=TAG).info(f"Easter egg GIANNINI attivato! Domanda: {domanda}")
 
-    # Effetto drammatico
-    result = "👑✨ **GIANNINO** ✨👑\n\n"
-    result += f"_{RISPOSTA_GIANNINO}_\n\n"
-    result += "🎺🎺🎺"
+    import random
+    risposta = random.choice([RISPOSTA_GIANNINI] + VARIANTI)
 
-    # Versione parlata con enfasi
-    spoken = "Ah, Giannino! " + RISPOSTA_GIANNINO
+    # Effetto SUPER drammatico
+    result = "👑🔥✨ **GIANNINI** ✨🔥👑\n\n"
+    result += f"_{risposta}_\n\n"
+    result += "🎺🎺🎺 GLORIA! 🎺🎺🎺"
+
+    # Versione parlata CON ENFASI ED ECCITAZIONE!
+    spoken = risposta
 
     return ActionResponse(Action.RESPONSE, result, spoken)

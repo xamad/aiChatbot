@@ -83,6 +83,10 @@ User: "litiga con te stesso" -> {{"function_call": {{"name": "easter_egg_folli",
 User: "suono della pioggia" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "pioggia"}}}}}}
 User: "rumore bianco per dormire" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "rumore_bianco"}}}}}}
 User: "onde del mare" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "onde"}}}}}}
+User: "aggiungi latte alla spesa" -> {{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "aggiungi", "prodotto": "latte"}}}}}}
+User: "cosa devo comprare" -> {{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "leggi"}}}}}}
+User: "traduci ciao in inglese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "ciao", "lingua_destinazione": "inglese"}}}}}}
+User: "come si dice grazie in francese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "grazie", "lingua_destinazione": "francese"}}}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
@@ -175,12 +179,18 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
                 return f'{{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": {num_match.group(1)}}}}}}}'
             return '{"function_call": {"name": "osterie_goliardiche"}}'
 
-        # ============ GIANNINO (Easter Egg) ============
-        if 'giannino' in text_lower:
+        # ============ GIANNINI (Easter Egg EPICO!) ============
+        if 'giannini' in text_lower or 'giannino' in text_lower:
             return f'{{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "{text}"}}}}}}'
 
-        # ============ RICETTE ============
-        if match_any(['ricetta', 'come si fa', 'come si cucina', 'ingredienti', 'prepara']):
+        # ============ RICETTE CON INGREDIENTI (prima di ricette generiche!) ============
+        if match_any(['cosa posso cucinare', 'ricette con', 'ho in casa', 'cosa preparo con', 'che piatto faccio con', 'idee ricette']):
+            ing_match = re.search(r'(?:con|ho)\s+(.+?)(?:\?|$)', text_lower)
+            ingredienti = ing_match.group(1) if ing_match else text
+            return f'{{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "{ingredienti}"}}}}}}'
+
+        # ============ RICETTE (generiche) ============
+        if match_any(['ricetta', 'come si fa', 'come si cucina', 'prepara']):
             return f'{{"function_call": {{"name": "ricette", "arguments": {{"query": "{text}"}}}}}}'
 
         # ============ QUIZ/TRIVIA ============
@@ -207,15 +217,36 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['frase del giorno', 'citazione', 'frase motivazionale', 'ispirami']):
             return '{"function_call": {"name": "frase_del_giorno"}}'
 
-        # ============ TRADUTTORE ============
-        if match_any(['traduci', 'traduzione', 'come si dice', 'in inglese', 'in francese', 'in spagnolo', 'in tedesco']):
-            return f'{{"function_call": {{"name": "traduttore", "arguments": {{"text": "{text}"}}}}}}'
+        # ============ TRADUTTORE REALTIME ============
+        lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo']
+        if match_any(['traduci', 'traduzione', 'come si dice', 'traduttore', 'in inglese', 'in francese', 'in spagnolo', 'in tedesco']):
+            # Estrai lingua destinazione
+            lingua_dest = "inglese"
+            for lingua in lingue_trad:
+                if lingua in text_lower or f"in {lingua}" in text_lower:
+                    lingua_dest = lingua
+                    break
+            # Estrai testo da tradurre
+            testo_match = re.search(r'(?:traduci|come si dice)\s+["\']?(.+?)["\']?\s+in\s+\w+', text_lower)
+            if not testo_match:
+                testo_match = re.search(r'(?:traduci|traduzione|come si dice)\s+(.+?)$', text_lower)
+            testo = testo_match.group(1).strip() if testo_match else ""
+            return f'{{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "{testo}", "lingua_destinazione": "{lingua_dest}"}}}}}}'
 
-        # ============ LISTA SPESA ============
-        if match_any(['lista spesa', 'lista della spesa', 'aggiungi alla spesa', 'cosa devo comprare']):
-            if match_any(['aggiungi', 'metti', 'inserisci']):
-                return f'{{"function_call": {{"name": "lista_spesa", "arguments": {{"action": "add", "item": "{text}"}}}}}}'
-            return '{"function_call": {"name": "lista_spesa", "arguments": {"action": "list"}}}'
+        # ============ SHOPPING VOCALE (Lista Spesa Avanzata) ============
+        if match_any(['lista spesa', 'lista della spesa', 'cosa devo comprare', 'cosa manca', 'devo comprare']):
+            return '{"function_call": {"name": "shopping_vocale", "arguments": {"azione": "leggi"}}}'
+        if match_any(['aggiungi alla spesa', 'metti in lista', 'metti nella spesa']):
+            # Estrai prodotto
+            prod_match = re.search(r'(?:aggiungi|metti)\s+(.+?)(?:\s+alla|\s+in|$)', text_lower)
+            prodotto = prod_match.group(1) if prod_match else ""
+            return f'{{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "aggiungi", "prodotto": "{prodotto}"}}}}}}'
+        if match_any(['ho comprato', 'togli dalla spesa', 'elimina dalla spesa']):
+            prod_match = re.search(r'(?:comprato|togli|elimina)\s+(.+?)(?:\s+dalla|$)', text_lower)
+            prodotto = prod_match.group(1) if prod_match else ""
+            return f'{{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "rimuovi", "prodotto": "{prodotto}"}}}}}}'
+        if match_any(['svuota la spesa', 'cancella la lista']):
+            return '{"function_call": {"name": "shopping_vocale", "arguments": {"azione": "svuota"}}}'
 
         # ============ DOMOTICA ============
         if match_any(['accendi luce', 'spegni luce', 'accendi presa', 'spegni presa', 'domotica']):
@@ -270,8 +301,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['cosa sai fare', 'quali funzioni', 'aiuto', 'help', 'cosa puoi fare', 'funzionalità']):
             return '{"function_call": {"name": "sommario_funzioni"}}'
 
-        # ============ SUPPORTO EMOTIVO ============
-        if match_any(['sono triste', 'mi sento solo', 'ho paura', 'sono ansioso', 'consolami', 'supporto']):
+        # ============ SUPPORTO EMOTIVO (ansia, paura - NON solitudine) ============
+        if match_any(['ho paura', 'sono ansioso', 'ansia', 'panico', 'consolami', 'aiutami psicologicamente']):
             return f'{{"function_call": {{"name": "supporto_emotivo", "arguments": {{"stato": "{text}"}}}}}}'
 
         # ============ GIOCHI ============
