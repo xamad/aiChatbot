@@ -25,93 +25,45 @@ class IntentProvider(IntentProviderBase):
 
     def get_intent_system_prompt(self, functions_list: str) -> str:
         """
-        根据配置的意图选项和可用函数动态生成系统提示词
-        Args:
-            functions: 可用的函数列表，JSON格式字符串
-        Returns:
-            格式化后的系统提示词
+        Generate system prompt for intent detection - optimized for Llama/Groq
         """
-
-        # 构建函数说明部分
-        functions_desc = "可用的函数列表：\n"
+        # Build compact function list
+        functions_desc = "AVAILABLE FUNCTIONS:\n"
         for func in functions_list:
             func_info = func.get("function", {})
             name = func_info.get("name", "")
             desc = func_info.get("description", "")
             params = func_info.get("parameters", {})
 
-            functions_desc += f"\n函数名: {name}\n"
-            functions_desc += f"描述: {desc}\n"
+            functions_desc += f"- {name}: {desc}"
+            if params and params.get("properties"):
+                param_names = list(params.get("properties", {}).keys())
+                if param_names:
+                    functions_desc += f" (params: {', '.join(param_names)})"
+            functions_desc += "\n"
 
-            if params:
-                functions_desc += "参数:\n"
-                for param_name, param_info in params.get("properties", {}).items():
-                    param_desc = param_info.get("description", "")
-                    param_type = param_info.get("type", "")
-                    functions_desc += f"- {param_name} ({param_type}): {param_desc}\n"
+        prompt = f"""You are a JSON-only intent classifier. Output ONLY valid JSON, no text.
 
-            functions_desc += "---\n"
+{functions_desc}
 
-        prompt = (
-            "【严格格式要求】你必须只能返回JSON格式，绝对不能返回任何自然语言！\n\n"
-            "你是一个意图识别助手。请分析用户的最后一句话，判断用户意图并调用相应的函数。\n\n"
-            "【重要规则】以下类型的查询请直接返回result_for_context，无需调用函数：\n"
-            "- 询问当前时间（如：现在几点、当前时间、查询时间等）\n"
-            "- 询问今天日期（如：今天几号、今天星期几、今天是什么日期等）\n"
-            "- 询问今天农历（如：今天农历几号、今天什么节气等）\n"
-            "- 询问所在城市（如：我现在在哪里、你知道我在哪个城市吗等）"
-            "系统会根据上下文信息直接构建回答。\n\n"
-            "- 如果用户使用疑问词（如'怎么'、'为什么'、'如何'）询问退出相关的问题（例如'怎么退出了？'），注意这不是让你退出，请返回 {'function_call': {'name': 'continue_chat'}\n"
-            "- 仅当用户明确使用'退出系统'、'结束对话'、'我不想和你说话了'等指令时，才触发 handle_exit_intent\n\n"
-            f"{functions_desc}\n"
-            "处理步骤:\n"
-            "1. 分析用户输入，确定用户意图\n"
-            "2. 检查是否为上述基础信息查询（时间、日期等），如是则返回result_for_context\n"
-            "3. 从可用函数列表中选择最匹配的函数\n"
-            "4. 如果找到匹配的函数，生成对应的function_call 格式\n"
-            '5. 如果没有找到匹配的函数，返回{"function_call": {"name": "continue_chat"}}\n\n'
-            "返回格式要求：\n"
-            "1. 必须返回纯JSON格式，不要包含任何其他文字\n"
-            "2. 必须包含function_call字段\n"
-            "3. function_call必须包含name字段\n"
-            "4. 如果函数需要参数，必须包含arguments字段\n\n"
-            "示例：\n"
-            "```\n"
-            "用户: 现在几点了？\n"
-            '返回: {"function_call": {"name": "result_for_context"}}\n'
-            "```\n"
-            "```\n"
-            "用户: 当前电池电量是多少？\n"
-            '返回: {"function_call": {"name": "get_battery_level", "arguments": {"response_success": "当前电池电量为{value}%", "response_failure": "无法获取Battery的当前电量百分比"}}}\n'
-            "```\n"
-            "```\n"
-            "用户: 当前屏幕亮度是多少？\n"
-            '返回: {"function_call": {"name": "self_screen_get_brightness"}}\n'
-            "```\n"
-            "```\n"
-            "用户: 设置屏幕亮度为50%\n"
-            '返回: {"function_call": {"name": "self_screen_set_brightness", "arguments": {"brightness": 50}}}\n'
-            "```\n"
-            "```\n"
-            "用户: 我想结束对话\n"
-            '返回: {"function_call": {"name": "handle_exit_intent", "arguments": {"say_goodbye": "goodbye"}}}\n'
-            "```\n"
-            "```\n"
-            "用户: 你好啊\n"
-            '返回: {"function_call": {"name": "continue_chat"}}\n'
-            "```\n\n"
-            "注意：\n"
-            "1. 只返回JSON格式，不要包含任何其他文字\n"
-            '2. 优先检查用户查询是否为基础信息（时间、日期等），如是则返回{"function_call": {"name": "result_for_context"}}，不需要arguments参数\n'
-            '3. 如果没有找到匹配的函数，返回{"function_call": {"name": "continue_chat"}}\n'
-            "4. 确保返回的JSON格式正确，包含所有必要的字段\n"
-            "5. result_for_context不需要任何参数，系统会自动从上下文获取信息\n"
-            "特殊说明：\n"
-            "- 当用户单次输入包含多个指令时（如'打开灯并且调高音量'）\n"
-            "- 请返回多个function_call组成的JSON数组\n"
-            "- 示例：{'function_calls': [{name:'light_on'}, {name:'volume_up'}]}\n\n"
-            "【最终警告】绝对禁止输出任何自然语言、表情符号或解释文字！只能输出有效JSON格式！违反此规则将导致系统错误！"
-        )
+RULES:
+1. Match user intent to a function from the list above
+2. For time/date queries: {{"function_call": {{"name": "result_for_context"}}}}
+3. For greetings/chat: {{"function_call": {{"name": "continue_chat"}}}}
+4. For function match: {{"function_call": {{"name": "function_name", "arguments": {{...}}}}}}
+
+EXAMPLES:
+User: "che ore sono?" -> {{"function_call": {{"name": "result_for_context"}}}}
+User: "ciao come stai?" -> {{"function_call": {{"name": "continue_chat"}}}}
+User: "che tempo fa a Roma?" -> {{"function_call": {{"name": "meteo_italia", "arguments": {{"city": "Roma"}}}}}}
+User: "accendi la radio" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play"}}}}}}
+User: "sintonizzati su radio zeta" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play", "station": "radio zeta"}}}}}}
+User: "metti radio deejay" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play", "station": "radio deejay"}}}}}}
+User: "quali radio hai" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "list"}}}}}}
+User: "raccontami una barzelletta" -> {{"function_call": {{"name": "barzelletta_bambini"}}}}
+User: "Giannino" -> {{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "Giannino"}}}}}}
+
+OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
 
     def replyResult(self, text: str, original_text: str):
@@ -127,6 +79,212 @@ class IntentProvider(IntentProviderBase):
             raise ValueError("LLM provider not set")
         if conn.func_handler is None:
             return '{"function_call": {"name": "continue_chat"}}'
+
+        # Pre-check per pattern comuni (bypass LLM per richieste ovvie)
+        text_lower = text.lower().strip()
+
+        # Funzione helper per match
+        def match_any(keywords):
+            return any(kw in text_lower for kw in keywords)
+
+        # ============ RADIO ============
+        if match_any(['sintonizza', 'metti radio', 'ascolta radio', 'accendi radio']) or \
+           (match_any(['radio']) and match_any(['deejay', 'zeta', 'capital', 'm2o', 'italia', 'rai', '105', 'virgin', 'kiss', 'rtl'])):
+            station_match = re.search(r'radio\s*(\w+)', text_lower)
+            station = station_match.group(0) if station_match else ""
+            if match_any(['elenco', 'lista', 'quali radio']):
+                return '{"function_call": {"name": "radio_italia", "arguments": {"action": "list"}}}'
+            elif match_any(['stop', 'ferma', 'spegni']):
+                return '{"function_call": {"name": "radio_italia", "arguments": {"action": "stop"}}}'
+            result = f'{{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play", "station": "{station}"}}}}}}'
+            logger.bind(tag=TAG).debug(f"Pre-check: radio -> {result}")
+            return result
+
+        # ============ METEO ============
+        if match_any(['che tempo fa', 'meteo', 'previsioni', 'piove', 'temperatura', 'come sarà il tempo']):
+            city_match = re.search(r'(?:a|di|per|su)\s+(\w+)', text_lower)
+            city = city_match.group(1) if city_match else ""
+            result = f'{{"function_call": {{"name": "meteo_italia", "arguments": {{"city": "{city}"}}}}}}'
+            logger.bind(tag=TAG).debug(f"Pre-check: meteo -> {result}")
+            return result
+
+        # ============ NOTIZIE ============
+        if match_any(['notizie', 'ultime news', 'cosa succede', 'telegiornale', 'rassegna stampa']):
+            return '{"function_call": {"name": "notizie_italia", "arguments": {"action": "headlines"}}}'
+
+        # ============ BARZELLETTE ============
+        if match_any(['barzelletta', 'battuta', 'raccontami una', 'fammi ridere']):
+            if match_any(['adulti', 'spinta', 'sconce', 'per grandi']):
+                return '{"function_call": {"name": "barzelletta_adulti"}}'
+            return '{"function_call": {"name": "barzelletta_bambini"}}'
+
+        # ============ TIMER/SVEGLIA ============
+        if match_any(['timer', 'sveglia', 'svegliami', 'countdown']):
+            minutes_match = re.search(r'(\d+)\s*minut', text_lower)
+            minutes = minutes_match.group(1) if minutes_match else "5"
+            if match_any(['cancella', 'stop', 'ferma']):
+                return '{"function_call": {"name": "timer_sveglia", "arguments": {"action": "cancel"}}}'
+            return f'{{"function_call": {{"name": "timer_sveglia", "arguments": {{"action": "set", "minutes": {minutes}}}}}}}'
+
+        # ============ PROMEMORIA ============
+        if match_any(['ricordami', 'promemoria', 'ricorda di', 'non dimenticare']):
+            return f'{{"function_call": {{"name": "promemoria", "arguments": {{"action": "add", "text": "{text}"}}}}}}'
+
+        # ============ CALCOLATRICE ============
+        if match_any(['quanto fa', 'calcola', 'somma', 'moltiplica', 'dividi', 'percentuale']):
+            return f'{{"function_call": {{"name": "calcolatrice", "arguments": {{"expression": "{text}"}}}}}}'
+
+        # ============ OROSCOPO ============
+        if match_any(['oroscopo', 'segno zodiacale', 'ariete', 'toro', 'gemelli', 'cancro', 'leone', 'vergine', 'bilancia', 'scorpione', 'sagittario', 'capricorno', 'acquario', 'pesci']):
+            segni = ['ariete', 'toro', 'gemelli', 'cancro', 'leone', 'vergine', 'bilancia', 'scorpione', 'sagittario', 'capricorno', 'acquario', 'pesci']
+            segno = next((s for s in segni if s in text_lower), "")
+            return f'{{"function_call": {{"name": "oroscopo", "arguments": {{"segno": "{segno}"}}}}}}'
+
+        # ============ OSTERIE GOLIARDICHE ============
+        if match_any(['paraponzi', 'osteria numero', 'canta osteria', 'canzone goliardica', 'canto goliardico']):
+            num_match = re.search(r'numero\s*(\d+)', text_lower)
+            if num_match:
+                return f'{{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": {num_match.group(1)}}}}}}}'
+            return '{"function_call": {"name": "osterie_goliardiche"}}'
+
+        # ============ GIANNINO (Easter Egg) ============
+        if 'giannino' in text_lower:
+            return f'{{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "{text}"}}}}}}'
+
+        # ============ RICETTE ============
+        if match_any(['ricetta', 'come si fa', 'come si cucina', 'ingredienti', 'prepara']):
+            return f'{{"function_call": {{"name": "ricette", "arguments": {{"query": "{text}"}}}}}}'
+
+        # ============ QUIZ/TRIVIA ============
+        if match_any(['quiz', 'trivia', 'domanda cultura', 'indovina', 'gioco domande']):
+            return '{"function_call": {"name": "quiz_trivia", "arguments": {"action": "start"}}}'
+
+        # ============ STORIE BAMBINI ============
+        if match_any(['racconta storia', 'favola', 'fiaba', 'storia della buonanotte', 'raccontami una storia']):
+            return '{"function_call": {"name": "storie_bambini"}}'
+
+        # ============ PROVERBI ============
+        if match_any(['proverbio', 'detto popolare', 'saggezza popolare', 'modi di dire']):
+            return '{"function_call": {"name": "proverbi_italiani"}}'
+
+        # ============ SANTO DEL GIORNO ============
+        if match_any(['santo del giorno', 'che santo è', 'san ', 'santa ', 'onomastico']):
+            return '{"function_call": {"name": "santo_del_giorno"}}'
+
+        # ============ CURIOSITÀ ============
+        if match_any(['curiosità', 'lo sapevi', 'fatto interessante', 'dimmi qualcosa']):
+            return '{"function_call": {"name": "curiosita"}}'
+
+        # ============ FRASE DEL GIORNO ============
+        if match_any(['frase del giorno', 'citazione', 'frase motivazionale', 'ispirami']):
+            return '{"function_call": {"name": "frase_del_giorno"}}'
+
+        # ============ TRADUTTORE ============
+        if match_any(['traduci', 'traduzione', 'come si dice', 'in inglese', 'in francese', 'in spagnolo', 'in tedesco']):
+            return f'{{"function_call": {{"name": "traduttore", "arguments": {{"text": "{text}"}}}}}}'
+
+        # ============ LISTA SPESA ============
+        if match_any(['lista spesa', 'lista della spesa', 'aggiungi alla spesa', 'cosa devo comprare']):
+            if match_any(['aggiungi', 'metti', 'inserisci']):
+                return f'{{"function_call": {{"name": "lista_spesa", "arguments": {{"action": "add", "item": "{text}"}}}}}}'
+            return '{"function_call": {"name": "lista_spesa", "arguments": {"action": "list"}}}'
+
+        # ============ DOMOTICA ============
+        if match_any(['accendi luce', 'spegni luce', 'accendi presa', 'spegni presa', 'domotica']):
+            action = "on" if match_any(['accendi']) else "off" if match_any(['spegni']) else "list"
+            device_match = re.search(r'(?:luce|presa|dispositivo)\s+(\w+)', text_lower)
+            device = device_match.group(0) if device_match else ""
+            return f'{{"function_call": {{"name": "domotica", "arguments": {{"action": "{action}", "device": "{device}"}}}}}}'
+
+        # ============ MEDITAZIONE ============
+        if match_any(['meditazione', 'rilassamento', 'respirazione', 'mindfulness', 'rilassati']):
+            return '{"function_call": {"name": "meditazione"}}'
+
+        # ============ PODCAST ============
+        if match_any(['podcast', 'ascolta podcast', 'metti podcast']):
+            return '{"function_call": {"name": "podcast_italia", "arguments": {"action": "list"}}}'
+
+        # ============ LOTTO ============
+        if match_any(['lotto', 'estrazione', 'numeri lotto', 'superenalotto']):
+            return '{"function_call": {"name": "lotto_estrazioni"}}'
+
+        # ============ DADO ============
+        if match_any(['lancia dado', 'tira dado', 'testa o croce', 'lancio moneta', 'd6', 'd20']):
+            return '{"function_call": {"name": "dado"}}'
+
+        # ============ CONVERTITORE ============
+        if match_any(['converti', 'conversione', 'quanti km', 'quanti euro', 'fahrenheit', 'celsius']):
+            return f'{{"function_call": {{"name": "convertitore", "arguments": {{"query": "{text}"}}}}}}'
+
+        # ============ NUMERI UTILI ============
+        if match_any(['numero telefono', 'numero utile', 'emergenza', 'carabinieri', 'polizia', 'ambulanza', '118', '112', '113']):
+            return '{"function_call": {"name": "numeri_utili"}}'
+
+        # ============ ACCADDE OGGI ============
+        if match_any(['accadde oggi', 'cosa è successo oggi', 'eventi storici', 'questo giorno nella storia']):
+            return '{"function_call": {"name": "accadde_oggi"}}'
+
+        # ============ AGENDA ============
+        if match_any(['agenda', 'appuntamento', 'calendario', 'cosa ho domani', 'prossimi impegni']):
+            if match_any(['aggiungi', 'inserisci', 'metti']):
+                return f'{{"function_call": {{"name": "agenda_eventi", "arguments": {{"action": "add", "titolo": "{text}"}}}}}}'
+            return '{"function_call": {"name": "agenda_eventi", "arguments": {"action": "today"}}}'
+
+        # ============ NOTE VOCALI ============
+        if match_any(['nota vocale', 'prendi nota', 'annotazione', 'scrivi questo']):
+            return f'{{"function_call": {{"name": "note_vocali", "arguments": {{"action": "add", "content": "{text}"}}}}}}'
+
+        # ============ RUBRICA ============
+        if match_any(['rubrica', 'numero di', 'telefono di', 'contatto']):
+            return f'{{"function_call": {{"name": "rubrica_vocale", "arguments": {{"action": "search", "query": "{text}"}}}}}}'
+
+        # ============ SOMMARIO FUNZIONI ============
+        if match_any(['cosa sai fare', 'quali funzioni', 'aiuto', 'help', 'cosa puoi fare', 'funzionalità']):
+            return '{"function_call": {"name": "sommario_funzioni"}}'
+
+        # ============ SUPPORTO EMOTIVO ============
+        if match_any(['sono triste', 'mi sento solo', 'ho paura', 'sono ansioso', 'consolami', 'supporto']):
+            return f'{{"function_call": {{"name": "supporto_emotivo", "arguments": {{"stato": "{text}"}}}}}}'
+
+        # ============ GIOCHI ============
+        if match_any(['impiccato', 'giochiamo impiccato']):
+            return '{"function_call": {"name": "impiccato", "arguments": {"action": "start"}}}'
+        if match_any(['battaglia navale', 'affondare', 'navi']):
+            return '{"function_call": {"name": "battaglia_navale", "arguments": {"action": "start"}}}'
+        if match_any(['20 domande', 'venti domande', 'indovina cosa penso']):
+            return '{"function_call": {"name": "venti_domande", "arguments": {"action": "start"}}}'
+        if match_any(['chi vuol essere milionario', 'milionario']):
+            return '{"function_call": {"name": "chi_vuol_essere", "arguments": {"action": "start"}}}'
+        if match_any(['cruciverba', 'parole crociate']):
+            return '{"function_call": {"name": "cruciverba_vocale", "arguments": {"action": "start"}}}'
+
+        # ============ KARAOKE ============
+        if match_any(['karaoke', 'cantiamo', 'testo canzone']):
+            return f'{{"function_call": {{"name": "karaoke", "arguments": {{"query": "{text}"}}}}}}'
+
+        # ============ ORACOLO ============
+        if match_any(['oracolo', 'dimmi il futuro', 'previsione', 'cosa mi aspetta']):
+            return f'{{"function_call": {{"name": "oracolo", "arguments": {{"domanda": "{text}"}}}}}}'
+
+        # ============ COMPAGNO NOTTURNO ============
+        if match_any(['non riesco a dormire', 'insonnia', 'compagnia stanotte', 'ho incubi']):
+            return '{"function_call": {"name": "compagno_notturno"}}'
+
+        # ============ CERCA MUSICA (YouTube) ============
+        if match_any(['suona', 'metti la canzone', 'cerca musica', 'fammi sentire', 'play music']):
+            return f'{{"function_call": {{"name": "cerca_musica", "arguments": {{"query": "{text}"}}}}}}'
+
+        # ============ GUIDA TURISTICA ============
+        if match_any(['guida turistica', 'cosa visitare', 'monumenti', 'turismo', 'luoghi da vedere']):
+            return f'{{"function_call": {{"name": "guida_turistica", "arguments": {{"location": "{text}"}}}}}}'
+
+        # ============ GUIDA RISTORANTI ============
+        if match_any(['ristorante', 'dove mangiare', 'pizzeria', 'trattoria', 'consigliami un locale']):
+            return f'{{"function_call": {{"name": "guida_ristoranti", "arguments": {{"query": "{text}"}}}}}}'
+
+        # ============ WEB SEARCH ============
+        if match_any(['cerca su internet', 'cerca online', 'google', 'ricerca web']):
+            return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{text}"}}}}}}'
 
         # 记录整体开始时间
         total_start_time = time.time()

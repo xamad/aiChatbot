@@ -17,89 +17,117 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 60  # Secondi per chunk
+CHUNK_DURATION = 30  # Secondi per chunk (ridotto per meno latenza)
+MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione continua
 
-# Stazioni radio italiane con stream URL
+# Stazioni radio italiane con stream URL verificati (Gennaio 2026)
+# Mix di stream MP3 diretti e HLS (m3u8)
 RADIO_STATIONS = {
-    "rai radio 1": {
-        "name": "Rai Radio 1",
-        "url": "https://icestreaming.rai.it/1.mp3",
-        "desc": "Notizie e attualità"
-    },
-    "rai radio 2": {
-        "name": "Rai Radio 2",
-        "url": "https://icestreaming.rai.it/2.mp3",
-        "desc": "Musica e intrattenimento"
-    },
-    "rai radio 3": {
-        "name": "Rai Radio 3",
-        "url": "https://icestreaming.rai.it/3.mp3",
-        "desc": "Cultura e musica classica"
-    },
+    # === RADIO COMMERCIALI ITALIANE ===
     "radio deejay": {
         "name": "Radio DeeJay",
-        "url": "https://radiodeejay-lh.akamaihd.net/i/RadioDeejay_Live_1@189857/master.m3u8",
-        "desc": "Musica pop e dance"
+        "url": "https://4c4b867c89244861ac216426883d1ad0.msvdn.net/radiodeejay/radiodeejay/master_ma.m3u8",
+        "referer": "https://www.deejay.it/",
+        "desc": "Musica e programmi cult"
     },
-    "rtl 102.5": {
-        "name": "RTL 102.5",
-        "url": "https://dd.rtl.it/broadcast/rtl1025.mp3",
-        "desc": "Very Normal People"
+    "m2o": {
+        "name": "m2o",
+        "url": "https://4c4b867c89244861ac216426883d1ad0.msvdn.net/radiom2o/radiom2o/master_ma.m3u8",
+        "referer": "https://www.m2o.it/",
+        "desc": "Dance e musica elettronica"
+    },
+    "radio capital": {
+        "name": "Radio Capital",
+        "url": "https://streamcdnf25-4c4b867c89244861ac216426883d1ad0.msvdn.net/radiocapital/radiocapital/master_ma.m3u8",
+        "referer": "https://www.capital.it/",
+        "desc": "Classic rock e pop"
+    },
+    "radio zeta": {
+        "name": "Radio Zeta",
+        "url": "https://streamingv2.shoutcast.com/radio-zeta",
+        "referer": "https://www.radiozeta.it/",
+        "desc": "Generazione futuro - Hit italiane"
+    },
+    "radio z": {
+        "name": "Radio Zeta",
+        "url": "https://streamingv2.shoutcast.com/radio-zeta",
+        "referer": "https://www.radiozeta.it/",
+        "desc": "Generazione futuro - Hit italiane"
+    },
+    "radio italia": {
+        "name": "Radio Italia",
+        "url": "https://radioitaliasmi.akamaized.net/hls/live/2093120/RISMI/stream01/streamPlaylist.m3u8",
+        "referer": "https://www.radioitalia.it/",
+        "desc": "Solo musica italiana"
     },
     "radio 105": {
         "name": "Radio 105",
         "url": "https://icecast.unitedradio.it/Radio105.mp3",
+        "referer": "https://www.105.net/",
         "desc": "Musica e news"
-    },
-    "radio italia": {
-        "name": "Radio Italia",
-        "url": "https://radioitaliasmi.akamaized.net/hls/live/2093120/RADIOITALIA/stream01/streamPlaylist.m3u8",
-        "desc": "Solo musica italiana"
     },
     "virgin radio": {
         "name": "Virgin Radio",
         "url": "https://icecast.unitedradio.it/Virgin.mp3",
+        "referer": "https://www.virginradio.it/",
         "desc": "Rock music"
     },
     "radio kiss kiss": {
         "name": "Radio Kiss Kiss",
         "url": "https://ice07.fluidstream.net/KissKiss.mp3",
+        "referer": "https://www.kisskiss.it/",
         "desc": "Hit del momento"
     },
-    "m2o": {
-        "name": "m2o",
-        "url": "https://m2o.akamaized.net/hls/live/2093123/M2O/master.m3u8",
-        "desc": "Dance e elettronica"
+    # === RAI RADIO ===
+    "rai radio 1": {
+        "name": "Rai Radio 1",
+        "url": "https://icestreaming.rai.it/1.mp3",
+        "referer": "https://www.raiplayradio.it/",
+        "desc": "Notizie e attualità"
     },
-    "radio capital": {
-        "name": "Radio Capital",
-        "url": "https://capital.akamaized.net/hls/live/2093122/CAPITAL/master.m3u8",
-        "desc": "Classic rock"
+    "rai radio 2": {
+        "name": "Rai Radio 2",
+        "url": "https://icestreaming.rai.it/2.mp3",
+        "referer": "https://www.raiplayradio.it/",
+        "desc": "Musica e intrattenimento"
     },
-    "rds": {
-        "name": "RDS 100% Grandi Successi",
-        "url": "https://stream.rds.it/rds.mp3",
-        "desc": "Grandi successi"
+    "rai radio 3": {
+        "name": "Rai Radio 3",
+        "url": "https://icestreaming.rai.it/3.mp3",
+        "referer": "https://www.raiplayradio.it/",
+        "desc": "Cultura e musica classica"
     },
-    "radio 24": {
-        "name": "Radio 24",
-        "url": "https://shoutcast.radio24.it/radio24",
-        "desc": "News e informazione"
+    "rai radio classica": {
+        "name": "Rai Radio Classica",
+        "url": "https://icestreaming.rai.it/5.mp3",
+        "referer": "https://www.raiplayradio.it/",
+        "desc": "Musica classica"
     },
-    "radio zeta": {
-        "name": "Radio Zeta",
-        "url": "https://radiozeta.akamaized.net/hls/live/2093124/RADIOZETA/master.m3u8",
-        "desc": "Future Hits - Musica giovane"
+    # === NEWS E TALK ===
+    "radio radicale": {
+        "name": "Radio Radicale",
+        "url": "https://stream.radioradicale.it/live.mp3",
+        "referer": "https://www.radioradicale.it/",
+        "desc": "Politica e Parlamento"
     },
-    "radio freccia": {
-        "name": "Radio Freccia",
-        "url": "https://radiofreccia.akamaized.net/hls/live/2093121/RADIOFRECCIA/master.m3u8",
-        "desc": "Rock italiano"
+    "radio cusano": {
+        "name": "Radio Cusano Campus",
+        "url": "https://ice05.fluidstream.net/RadioCusano.mp3",
+        "referer": "https://www.radiocusanocampus.it/",
+        "desc": "News e attualità"
     },
-    "radio monte carlo": {
-        "name": "Radio Monte Carlo",
-        "url": "https://rmc.akamaized.net/hls/live/2093125/RMC/master.m3u8",
-        "desc": "Musica raffinata"
+    # === RADIO INTERNAZIONALI ===
+    "bbc world service": {
+        "name": "BBC World Service",
+        "url": "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service",
+        "referer": "https://www.bbc.co.uk/",
+        "desc": "Notizie internazionali in inglese"
+    },
+    "bbc radio 4": {
+        "name": "BBC Radio 4",
+        "url": "https://stream.live.vc.bbcmedia.co.uk/bbc_radio_fourfm",
+        "referer": "https://www.bbc.co.uk/",
+        "desc": "News e cultura BBC"
     },
 }
 
@@ -110,15 +138,18 @@ RADIO_ITALIA_FUNCTION_DESC = {
         "description": (
             "播放意大利广播电台 / Riproduce stazioni radio italiane in streaming. "
             "当用户想听广播时使用。"
-            "Use when: 'metti radio...', 'ascolta radio...', 'radio deejay', 'rai radio 1', "
-            "'accendi la radio', 'fammi sentire rtl'"
+            "Use when: 'sintonizzati su radio', 'sintonizza radio', 'metti radio...', "
+            "'ascolta radio...', 'radio deejay', 'radio zeta', 'radio z', 'rai radio 1', "
+            "'accendi la radio', 'fammi sentire rtl', 'm2o', 'radio capital', "
+            "'elenco radio', 'quali radio hai', 'che radio ci sono', 'lista radio', "
+            "'dimmi le radio disponibili', 'cosa posso ascoltare'"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "station": {
                     "type": "string",
-                    "description": "Nome della stazione radio (es: radio deejay, rtl 102.5, rai radio 1)",
+                    "description": "Nome della stazione radio (es: radio deejay, m2o, rai radio 1, radio zeta)",
                 },
                 "action": {
                     "type": "string",
@@ -160,39 +191,162 @@ def find_station(query: str) -> dict:
     return None
 
 
-def capture_radio_chunk(url: str, output_path: str, duration: int = 60) -> bool:
-    """Cattura un chunk di radio usando ffmpeg"""
+def capture_radio_chunk(url: str, output_path: str, duration: int = 30, referer: str = None) -> bool:
+    """
+    Cattura un chunk di radio usando Python urllib (più affidabile per headers)
+    poi converte in MP3 con ffmpeg
+    """
     try:
         os.makedirs(RADIO_CACHE_DIR, exist_ok=True)
+        import urllib.request
 
-        cmd = [
-            "ffmpeg",
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "-i", url,
-            "-t", str(duration),
-            "-c:a", "libmp3lame",
-            "-b:a", "128k",
-            "-y",
-            output_path
-        ]
+        # Headers browser completi
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Connection': 'keep-alive',
+        }
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=duration + 30
-        )
+        if referer:
+            headers['Referer'] = referer
+            headers['Origin'] = referer.rstrip('/')
 
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            logger.bind(tag=TAG).info(f"Radio catturata: {output_path}")
-            return True
+        # Per stream HLS, usa ffmpeg con headers file
+        if '.m3u8' in url or 'hls' in url.lower():
+            return capture_hls_stream(url, output_path, duration, headers)
+
+        # Per stream MP3 diretti, scarica con Python urllib
+        req = urllib.request.Request(url, headers=headers)
+        raw_file = output_path.replace('.mp3', '_raw.dat')
+
+        try:
+            # Calcola bytes da scaricare (128kbps = 16KB/s)
+            bytes_to_download = duration * 16 * 1024
+
+            with urllib.request.urlopen(req, timeout=duration + 30) as resp:
+                if resp.status != 200:
+                    logger.bind(tag=TAG).error(f"HTTP {resp.status} per {url}")
+                    return False
+
+                with open(raw_file, 'wb') as f:
+                    downloaded = 0
+                    while downloaded < bytes_to_download:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                logger.bind(tag=TAG).info(f"Scaricati {downloaded} bytes")
+
+            # Converti con ffmpeg
+            if os.path.exists(raw_file) and os.path.getsize(raw_file) > 1000:
+                cmd = [
+                    "ffmpeg", "-y", "-i", raw_file,
+                    "-t", str(duration),
+                    "-c:a", "libmp3lame", "-b:a", "128k",
+                    output_path
+                ]
+                subprocess.run(cmd, capture_output=True, timeout=60)
+
+                if os.path.exists(raw_file):
+                    os.remove(raw_file)
+
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                    logger.bind(tag=TAG).info(f"Radio salvata: {output_path}")
+                    return True
+
+        except urllib.error.HTTPError as e:
+            logger.bind(tag=TAG).error(f"HTTP Error {e.code}: {e.reason}")
+            return False
 
         return False
 
-    except subprocess.TimeoutExpired:
-        logger.bind(tag=TAG).error("Timeout cattura radio")
-        return False
     except Exception as e:
         logger.bind(tag=TAG).error(f"Errore cattura radio: {e}")
+        return False
+
+
+def capture_hls_stream(url: str, output_path: str, duration: int, headers: dict) -> bool:
+    """Cattura stream HLS (m3u8) scaricando manifest e segments con Python"""
+    import urllib.request
+    import re
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+
+        # Scarica il master manifest
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            manifest = resp.read().decode('utf-8')
+
+        # Trova URL degli stream (prendi la prima variante)
+        stream_urls = re.findall(r'https?://[^\s\n"]+\.m3u8[^\s\n"]*', manifest)
+        if not stream_urls:
+            # Prova a trovare URL relativo
+            stream_lines = [l for l in manifest.split('\n') if l.endswith('.m3u8') and not l.startswith('#')]
+            if stream_lines:
+                base_url = url.rsplit('/', 1)[0]
+                stream_urls = [f"{base_url}/{stream_lines[0]}"]
+
+        if not stream_urls:
+            logger.bind(tag=TAG).error("Nessuno stream trovato nel manifest HLS")
+            return False
+
+        # Scarica il playlist dello stream
+        stream_url = stream_urls[0]
+        req = urllib.request.Request(stream_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            playlist = resp.read().decode('utf-8')
+
+        # Trova i segment (.ts o .aac)
+        segments = re.findall(r'(https?://[^\s\n"]+\.(ts|aac|mp4)[^\s\n"]*)', playlist)
+        if not segments:
+            # URL relativi
+            segment_lines = [l.strip() for l in playlist.split('\n')
+                           if not l.startswith('#') and l.strip() and
+                           (l.endswith('.ts') or l.endswith('.aac') or '.ts?' in l)]
+            if segment_lines:
+                base_url = stream_url.rsplit('/', 1)[0]
+                segments = [(f"{base_url}/{s}", 'ts') for s in segment_lines[:10]]
+
+        if not segments:
+            logger.bind(tag=TAG).error("Nessun segment trovato nel playlist HLS")
+            return False
+
+        # Scarica i primi N segments (circa duration secondi, ~3s per segment)
+        num_segments = min(len(segments), duration // 3 + 1)
+        raw_file = output_path.replace('.mp3', '_raw.ts')
+
+        with open(raw_file, 'wb') as f:
+            for seg_url, _ in segments[:num_segments]:
+                try:
+                    req = urllib.request.Request(seg_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        f.write(resp.read())
+                except Exception as e:
+                    logger.bind(tag=TAG).warning(f"Segment skip: {e}")
+                    continue
+
+        if os.path.exists(raw_file) and os.path.getsize(raw_file) > 1000:
+            # Converti in MP3
+            cmd = [
+                "ffmpeg", "-y", "-i", raw_file,
+                "-t", str(duration),
+                "-c:a", "libmp3lame", "-b:a", "128k",
+                output_path
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=60)
+            os.remove(raw_file)
+
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                logger.bind(tag=TAG).info(f"HLS salvato: {output_path}")
+                return True
+
+        return False
+
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore HLS: {e}")
         return False
 
 
@@ -201,10 +355,18 @@ def radio_italia(conn, action: str = "list", station: str = None):
     logger.bind(tag=TAG).info(f"Radio Italia: action={action}, station={station}")
 
     if action == "list":
-        result = "📻 **Stazioni radio disponibili:**\n\n"
-        for key, s in RADIO_STATIONS.items():
-            result += f"• **{s['name']}** - {s['desc']}\n"
-        result += "\nDi' 'metti [nome radio]' per ascoltare!"
+        result = "Ecco le radio disponibili:\n\n"
+        result += "RADIO COMMERCIALI: "
+        result += "Radio DeeJay, m2o, Radio Capital, Radio Zeta, Radio Italia, "
+        result += "Radio 105, Virgin Radio, Radio Kiss Kiss.\n\n"
+        result += "RAI RADIO: "
+        result += "Rai Radio 1 per le notizie, Rai Radio 2 per musica e intrattenimento, "
+        result += "Rai Radio 3 per cultura, Rai Radio Classica.\n\n"
+        result += "NEWS E TALK: "
+        result += "Radio Radicale per politica, Radio Cusano Campus.\n\n"
+        result += "INTERNAZIONALI: "
+        result += "BBC World Service e BBC Radio 4 in inglese.\n\n"
+        result += "Dimmi quale vuoi ascoltare!"
         return ActionResponse(Action.REQLLM, result, None)
 
     if action == "stop":
@@ -238,6 +400,7 @@ async def capture_and_play_radio(conn, station: dict):
     try:
         station_name = station["name"]
         url = station["url"]
+        referer = station.get("referer")  # Referer per CDN
 
         await send_stt_message(conn, f"Sintonizzazione su {station_name}...")
 
@@ -245,14 +408,11 @@ async def capture_and_play_radio(conn, station: dict):
         safe_name = station_name.lower().replace(" ", "_").replace(".", "")
         output_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}.mp3")
 
-        # Cattura in thread separato
+        # Cattura in thread separato con referer
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(
             None,
-            capture_radio_chunk,
-            url,
-            output_path,
-            CHUNK_DURATION
+            lambda: capture_radio_chunk(url, output_path, CHUNK_DURATION, referer)
         )
 
         if success and os.path.exists(output_path):

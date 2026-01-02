@@ -10,6 +10,7 @@ from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
+from core.reminder_scheduler import get_reminder_scheduler
 
 TAG = __name__
 logger = setup_logging()
@@ -67,6 +68,11 @@ async def main():
     # 启动全局GC管理器（5分钟清理一次）
     gc_manager = get_gc_manager(interval_seconds=300)
     await gc_manager.start()
+
+    # Avvia lo scheduler per i promemoria
+    reminder_scheduler = get_reminder_scheduler()
+    await reminder_scheduler.start()
+    logger.bind(tag=TAG).info("Reminder Scheduler avviato")
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
@@ -129,6 +135,9 @@ async def main():
     finally:
         # 停止全局GC管理器
         await gc_manager.stop()
+
+        # Ferma lo scheduler promemoria
+        await reminder_scheduler.stop()
 
         # 取消所有任务（关键修复点）
         stdin_task.cancel()

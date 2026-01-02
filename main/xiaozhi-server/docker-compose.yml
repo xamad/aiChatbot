@@ -9,14 +9,16 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
-      - TZ=Asia/Shanghai
-    ports:
-      # ws服务端
-      - "8000:8000"
-      # http服务的端口，用于简单OTA接口(单服务部署)，以及视觉分析接口
-      - "8003:8003"
+      - TZ=Europe/Rome
+    network_mode: host
     volumes:
       # 配置文件目录
       - ./data:/opt/xiaozhi-esp32-server/data
       # 模型文件挂接，很重要
       - ./models/SenseVoiceSmall/model.pt:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/model.pt
+      # Plugin personalizzati
+      - ./plugins_func/functions:/opt/xiaozhi-esp32-server/plugins_func/functions
+      # Core modificato (connection registry, reminder scheduler)
+      - ./core:/opt/xiaozhi-esp32-server/core
+      # App.py modificato
+      - ./app.py:/opt/xiaozhi-esp32-server/app.py

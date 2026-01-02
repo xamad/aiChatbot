@@ -3,6 +3,7 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.api.config_panel import setup_config_routes
 
 TAG = __name__
 
@@ -74,6 +75,9 @@ class SimpleHttpServer:
                         ),
                     ]
                 )
+
+                # Pannello configurazione web
+                setup_config_routes(app)
 
                 # 运行服务
                 runner = web.AppRunner(app)

@@ -41,6 +41,7 @@ from config.manage_api_client import DeviceNotFoundException, DeviceBindExceptio
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
+from core.connection_registry import get_connection_registry
 
 TAG = __name__
 
@@ -206,6 +207,10 @@ class ConnectionHandler:
 
             # 在后台初始化配置和组件（完全不阻塞主循环）
             asyncio.create_task(self._background_initialize())
+
+            # Registra connessione nel registry per promemoria proattivi
+            if self.device_id:
+                await get_connection_registry().register(self.device_id, self)
 
             try:
                 async for message in self.websocket:
@@ -1092,6 +1097,10 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            # Rimuovi connessione dal registry
+            if self.device_id:
+                await get_connection_registry().unregister(self.device_id)
+
             # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):
                 self.audio_buffer.clear()

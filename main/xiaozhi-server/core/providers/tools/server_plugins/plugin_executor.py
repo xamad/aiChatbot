@@ -3,6 +3,32 @@
 from typing import Dict, Any
 from ..base import ToolType, ToolDefinition, ToolExecutor
 from plugins_func.register import all_function_registry, Action, ActionResponse
+from config.logger import setup_logging
+
+TAG = __name__
+logger = setup_logging()
+
+
+def stop_radio_if_playing(conn):
+    """Ferma la radio se sta suonando (per transizione fluida tra funzioni)"""
+    try:
+        from plugins_func.functions.radio_italia import is_radio_playing, stop_radio
+        if is_radio_playing(conn):
+            stop_radio(conn)
+            logger.bind(tag=TAG).info("Radio fermata automaticamente per cambio funzione")
+    except Exception as e:
+        logger.bind(tag=TAG).debug(f"Radio stop check: {e}")
+
+
+def track_function_usage(conn, tool_name: str):
+    """Registra l'uso della funzione nella memoria utente"""
+    try:
+        from plugins_func.functions.user_memory import registra_uso_funzione
+        device_id = getattr(conn, 'device_id', None)
+        if device_id:
+            registra_uso_funzione(device_id, tool_name)
+    except Exception as e:
+        logger.bind(tag=TAG).debug(f"Memory tracking: {e}")
 
 
 class ServerPluginExecutor(ToolExecutor):
@@ -22,6 +48,11 @@ class ServerPluginExecutor(ToolExecutor):
                 action=Action.NOTFOUND, response=f"插件函数 {tool_name} 不存在"
             )
 
+        # Ferma radio automaticamente se si chiama un'altra funzione
+        # (escluso radio_italia stessa)
+        if tool_name != "radio_italia":
+            stop_radio_if_playing(conn)
+
         try:
             # 根据工具类型决定如何调用
             if hasattr(func_item, "type"):
@@ -29,7 +60,7 @@ class ServerPluginExecutor(ToolExecutor):
                 if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
                     result = func_item.func(conn, **arguments)
                 elif func_type.code == 2:  # WAIT
-                    result = func_item.func(**arguments)
+                    result = func_item.func(conn, **arguments)
                 elif func_type.code == 3:  # CHANGE_SYS_PROMPT
                     result = func_item.func(conn, **arguments)
                 else:
@@ -37,6 +68,9 @@ class ServerPluginExecutor(ToolExecutor):
             else:
                 # 默认不传conn参数
                 result = func_item.func(**arguments)
+
+            # Registra uso funzione nella memoria utente
+            track_function_usage(conn, tool_name)
 
             return result
 
