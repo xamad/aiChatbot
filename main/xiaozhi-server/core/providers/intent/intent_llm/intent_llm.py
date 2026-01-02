@@ -62,6 +62,13 @@ User: "metti radio deejay" -> {{"function_call": {{"name": "radio_italia", "argu
 User: "quali radio hai" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "list"}}}}}}
 User: "raccontami una barzelletta" -> {{"function_call": {{"name": "barzelletta_bambini"}}}}
 User: "Giannino" -> {{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "Giannino"}}}}}}
+User: "tu chi sei?" -> {{"function_call": {{"name": "chi_sono"}}}}
+User: "come ti chiami?" -> {{"function_call": {{"name": "chi_sono"}}}}
+User: "cosa sai fare?" -> {{"function_call": {{"name": "chi_sono"}}}}
+User: "cosa posso cucinare con pasta e uova?" -> {{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "pasta, uova"}}}}}}
+User: "ho in casa pollo e patate, cosa preparo?" -> {{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "pollo, patate"}}}}}}
+User: "canta paraponziponzipò" -> {{"function_call": {{"name": "osterie_goliardiche"}}}}
+User: "all'osteria numero cinque" -> {{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": 5}}}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
