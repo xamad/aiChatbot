@@ -71,6 +71,18 @@ User: "canta paraponziponzipò" -> {{"function_call": {{"name": "osterie_goliard
 User: "all'osteria numero cinque" -> {{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": 5}}}}}}
 User: "fai il verso del gallo" -> {{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "gallo"}}}}}}
 User: "imita un animale da cortile" -> {{"function_call": {{"name": "versi_animali"}}}}
+User: "trasformati in pirata" -> {{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "pirata"}}}}}}
+User: "parla come un robot" -> {{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "robot"}}}}}}
+User: "fai il nonno burbero" -> {{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "nonno"}}}}}}
+User: "torna normale" -> {{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "normale"}}}}}}
+User: "mi sento solo" -> {{"function_call": {{"name": "compagno_antisolitudine"}}}}
+User: "fammi compagnia" -> {{"function_call": {{"name": "compagno_antisolitudine"}}}}
+User: "insultami" -> {{"function_call": {{"name": "easter_egg_folli", "arguments": {{"tipo": "insulto"}}}}}}
+User: "confessami, ho peccato" -> {{"function_call": {{"name": "easter_egg_folli", "arguments": {{"tipo": "confessione"}}}}}}
+User: "litiga con te stesso" -> {{"function_call": {{"name": "easter_egg_folli", "arguments": {{"tipo": "litigio"}}}}}}
+User: "suono della pioggia" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "pioggia"}}}}}}
+User: "rumore bianco per dormire" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "rumore_bianco"}}}}}}
+User: "onde del mare" -> {{"function_call": {{"name": "suoni_ambiente", "arguments": {{"suono": "onde"}}}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
