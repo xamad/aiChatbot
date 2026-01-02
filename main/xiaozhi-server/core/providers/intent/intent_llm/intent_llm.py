@@ -151,8 +151,14 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return f'{{"function_call": {{"name": "oroscopo", "arguments": {{"segno": "{segno}"}}}}}}'
 
         # ============ OSTERIE GOLIARDICHE ============
-        if match_any(['paraponzi', 'osteria numero', 'canta osteria', 'canzone goliardica', 'canto goliardico']):
-            num_match = re.search(r'numero\s*(\d+)', text_lower)
+        # Controlla se c'è un numero dopo "osteria" - indica filastrocca goliardica
+        osteria_num_match = re.search(r'osteria\s*(?:numero\s*)?(\d+)', text_lower)
+        if osteria_num_match:
+            num = osteria_num_match.group(1)
+            return f'{{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": {num}}}}}}}'
+        # Altri pattern goliardici
+        if match_any(['paraponzi', 'canta osteria', 'canzone goliardica', 'canto goliardico', 'all\'osteria numero', 'filastrocca osteria']):
+            num_match = re.search(r'(\d+)', text_lower)
             if num_match:
                 return f'{{"function_call": {{"name": "osterie_goliardiche", "arguments": {{"numero": {num_match.group(1)}}}}}}}'
             return '{"function_call": {"name": "osterie_goliardiche"}}'
