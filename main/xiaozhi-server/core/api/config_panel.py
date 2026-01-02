@@ -72,18 +72,18 @@ MODELLI_DISPONIBILI = {
     "gemma2-9b-it": {"nome": "Gemma 2 9B", "provider": "Groq", "desc": "Google, veloce", "speed": 4},
 }
 
-# Categorie funzioni
+# Categorie funzioni - nomi corrispondenti ai file in plugins_func/functions/
 CATEGORIE_FUNZIONI = {
-    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke"]},
-    "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno"]},
-    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzelletta_bambini", "barzelletta_adulti", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno"]},
-    "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale"]},
-    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "calcolatrice", "convertitore", "traduttore", "lista_spesa", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono"]},
-    "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica"]},
-    "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "check_benessere", "ginnastica_dolce", "conta_acqua"]},
-    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "sommario_funzioni", "intrattenitore_anziani", "complimenti"]},
-    "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "numeri_utili"]},
-    "ricerca": {"nome": "Ricerca", "icon": "🔍", "funzioni": ["web_search", "leggi_pagina"]},
+    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke", "play_music"]},
+    "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno", "get_time", "get_weather"]},
+    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
+    "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale", "allenamento_mentale"]},
+    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore", "lista_spesa", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale"]},
+    "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "hass_get_state", "hass_set_state"]},
+    "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino"]},
+    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata"]},
+    "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
+    "ricerca": {"nome": "Ricerca", "icon": "🔍", "funzioni": ["web_search", "leggi_pagina", "risposta_intelligente"]},
 }
 
 def get_available_functions():
