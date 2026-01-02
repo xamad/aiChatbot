@@ -135,7 +135,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return f'{{"function_call": {{"name": "calcolatrice", "arguments": {{"expression": "{text}"}}}}}}'
 
         # ============ OROSCOPO ============
-        if match_any(['oroscopo', 'segno zodiacale', 'ariete', 'toro', 'gemelli', 'cancro', 'leone', 'vergine', 'bilancia', 'scorpione', 'sagittario', 'capricorno', 'acquario', 'pesci']):
+        # Solo se dice esplicitamente "oroscopo" - NON solo segno zodiacale (evita conflitto giochi)
+        if match_any(['oroscopo', 'segno zodiacale', 'che segno', 'dimmi oroscopo', 'oroscopo di oggi']):
             segni = ['ariete', 'toro', 'gemelli', 'cancro', 'leone', 'vergine', 'bilancia', 'scorpione', 'sagittario', 'capricorno', 'acquario', 'pesci']
             segno = next((s for s in segni if s in text_lower), "")
             return f'{{"function_call": {{"name": "oroscopo", "arguments": {{"segno": "{segno}"}}}}}}'
@@ -286,6 +287,17 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['cerca su internet', 'cerca online', 'google', 'ricerca web']):
             return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{text}"}}}}}}'
 
+        # ============ CHI SONO (Identità chatbot) ============
+        if match_any(['chi sei', 'come ti chiami', 'tu chi sei', 'presentati', 'cosa sai fare', 'cosa sei', 'parlami di te', 'chi sei tu', 'dimmi chi sei']):
+            return '{"function_call": {"name": "chi_sono"}}'
+
+        # ============ RICETTE CON INGREDIENTI ============
+        if match_any(['cosa posso cucinare', 'ricette con', 'ho in casa', 'cosa preparo con', 'che piatto faccio con', 'idee ricette']):
+            # Estrai ingredienti
+            ing_match = re.search(r'(?:con|ho)\s+(.+?)(?:\?|$)', text_lower)
+            ingredienti = ing_match.group(1) if ing_match else text
+            return f'{{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "{ingredienti}"}}}}}}'
+
         # 记录整体开始时间
         total_start_time = time.time()
 
@@ -424,5 +436,9 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             logger.bind(tag=TAG).error(
                 f"无法解析意图JSON: {intent}, 后处理耗时: {postprocess_time:.4f}秒"
             )
-            # 如果解析失败，默认返回继续聊天意图
-            return '{"function_call": {"name": "continue_chat"}}'
+            # Fallback: usa web_search per dare comunque una risposta vocale
+            # invece di bloccarsi su continue_chat che può non rispondere
+            logger.bind(tag=TAG).info(
+                f"Fallback: uso web_search per rispondere a: {text[:50]}..."
+            )
+            return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{text}"}}}}}}'
