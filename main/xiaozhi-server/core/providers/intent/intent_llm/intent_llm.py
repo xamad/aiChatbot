@@ -87,6 +87,30 @@ User: "aggiungi latte alla spesa" -> {{"function_call": {{"name": "shopping_voca
 User: "cosa devo comprare" -> {{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "leggi"}}}}}}
 User: "traduci ciao in inglese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "ciao", "lingua_destinazione": "inglese"}}}}}}
 User: "come si dice grazie in francese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "grazie", "lingua_destinazione": "francese"}}}}}}
+User: "fai un beatbox" -> {{"function_call": {{"name": "beatbox_umano"}}}}
+User: "fammi una base trap" -> {{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "trap"}}}}}}
+User: "beat hip hop" -> {{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "hip hop"}}}}}}
+User: "cuciniamo la carbonara" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"ricetta": "carbonara"}}}}}}
+User: "prossimo step" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"azione": "avanti"}}}}}}
+User: "avanti con la ricetta" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"azione": "avanti"}}}}}}
+User: "ripeti lo step" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"azione": "ripeti"}}}}}}
+User: "ricordami che le chiavi sono nel cassetto" -> {{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "ricorda", "contenuto": "le chiavi sono nel cassetto"}}}}}}
+User: "dove ho messo le chiavi" -> {{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "cerca", "contenuto": "chiavi"}}}}}}
+User: "ricorda che Marco è allergico alle noci" -> {{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "ricorda", "contenuto": "Marco è allergico alle noci"}}}}}}
+User: "cosa sai di Marco" -> {{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "cerca", "contenuto": "Marco"}}}}}}
+User: "cerca su google intelligenza artificiale" -> {{"function_call": {{"name": "web_search", "arguments": {{"query": "intelligenza artificiale"}}}}}}
+User: "cercami informazioni sulla Luna" -> {{"function_call": {{"name": "web_search", "arguments": {{"query": "Luna"}}}}}}
+User: "trova su internet notizie bitcoin" -> {{"function_call": {{"name": "web_search", "arguments": {{"query": "notizie bitcoin"}}}}}}
+User: "cos'è il machine learning" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "cos'è il machine learning"}}}}}}
+User: "cosa significa algoritmo" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "cosa significa algoritmo"}}}}}}
+User: "chi è Elon Musk" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "chi è Elon Musk"}}}}}}
+User: "spiegami la fotosintesi" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "spiegami la fotosintesi"}}}}}}
+User: "come funziona un motore" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "come funziona un motore"}}}}}}
+User: "perché il cielo è blu" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "perché il cielo è blu"}}}}}}
+User: "chiedi a gpt cosa sono i buchi neri" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "cosa sono i buchi neri"}}}}}}
+User: "cerca con gemini la teoria della relatività" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "la teoria della relatività"}}}}}}
+User: "domanda ai: come si forma un arcobaleno" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "come si forma un arcobaleno"}}}}}}
+User: "chiedi a claude perché i gatti fanno le fusa" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "perché i gatti fanno le fusa"}}}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
@@ -138,7 +162,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return '{"function_call": {"name": "notizie_italia", "arguments": {"action": "headlines"}}}'
 
         # ============ BARZELLETTE ============
-        if match_any(['barzelletta', 'battuta', 'raccontami una', 'fammi ridere']):
+        # NON matchare "raccontami una storia" (va a storie_bambini)
+        if match_any(['barzelletta', 'battuta', 'fammi ridere', 'raccontami una barzelletta']):
             if match_any(['adulti', 'spinta', 'sconce', 'per grandi']):
                 return '{"function_call": {"name": "barzelletta_adulti"}}'
             return '{"function_call": {"name": "barzelletta_bambini"}}'
@@ -151,8 +176,17 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
                 return '{"function_call": {"name": "timer_sveglia", "arguments": {"action": "cancel"}}}'
             return f'{{"function_call": {{"name": "timer_sveglia", "arguments": {{"action": "set", "minutes": {minutes}}}}}}}'
 
-        # ============ PROMEMORIA ============
-        if match_any(['ricordami', 'promemoria', 'ricorda di', 'non dimenticare']):
+        # ============ MEMORIA PERSONALE (prima di promemoria!) ============
+        # "ricordami che X" = memoria, "ricordami di fare X" = promemoria
+        if match_any(['ricordami che', 'ricorda che', 'ricordati che', 'dove ho messo', 'dove sono le',
+                      'dove sta il', 'dove sta la', 'cosa mi hai detto', 'ti avevo detto']):
+            if match_any(['dove ho messo', 'dove sono', 'dove sta']):
+                return f'{{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "cerca", "contenuto": "{text}"}}}}}}'
+            return f'{{"function_call": {{"name": "memoria_personale", "arguments": {{"azione": "ricorda", "contenuto": "{text}"}}}}}}'
+
+        # ============ PROMEMORIA (dopo memoria personale) ============
+        # "ricordami di fare X" = promemoria (azione futura)
+        if match_any(['ricordami di', 'ricordami tra', 'promemoria', 'non dimenticare di']):
             return f'{{"function_call": {{"name": "promemoria", "arguments": {{"action": "add", "text": "{text}"}}}}}}'
 
         # ============ CALCOLATRICE ============
@@ -210,7 +244,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return '{"function_call": {"name": "santo_del_giorno"}}'
 
         # ============ CURIOSITÀ ============
-        if match_any(['curiosità', 'lo sapevi', 'fatto interessante', 'dimmi qualcosa']):
+        # NON matchare "dimmi qualcosa di cattivo" (va a easter_egg)
+        if match_any(['curiosità', 'lo sapevi', 'fatto interessante', 'dimmi qualcosa di interessante']):
             return '{"function_call": {"name": "curiosita"}}'
 
         # ============ FRASE DEL GIORNO ============
@@ -218,20 +253,29 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return '{"function_call": {"name": "frase_del_giorno"}}'
 
         # ============ TRADUTTORE REALTIME ============
-        lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo']
-        if match_any(['traduci', 'traduzione', 'come si dice', 'traduttore', 'in inglese', 'in francese', 'in spagnolo', 'in tedesco']):
+        # Pattern specifici per evitare conflitti
+        lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo', 'greco', 'olandese', 'polacco']
+        # Match esplicito: "traduci X in Y" o "come si dice X in Y"
+        if match_any(['traduci ', 'traduzione ', 'tradurre ', 'traduttore']):
             # Estrai lingua destinazione
             lingua_dest = "inglese"
             for lingua in lingue_trad:
-                if lingua in text_lower or f"in {lingua}" in text_lower:
+                if f"in {lingua}" in text_lower:
                     lingua_dest = lingua
                     break
             # Estrai testo da tradurre
-            testo_match = re.search(r'(?:traduci|come si dice)\s+["\']?(.+?)["\']?\s+in\s+\w+', text_lower)
+            testo_match = re.search(r'(?:traduci|traduzione|tradurre)\s+["\']?(.+?)["\']?\s+in\s+\w+', text_lower)
             if not testo_match:
-                testo_match = re.search(r'(?:traduci|traduzione|come si dice)\s+(.+?)$', text_lower)
-            testo = testo_match.group(1).strip() if testo_match else ""
+                testo_match = re.search(r'(?:traduci|traduzione|tradurre)\s+(.+?)$', text_lower)
+            testo = testo_match.group(1).strip() if testo_match else text
             return f'{{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "{testo}", "lingua_destinazione": "{lingua_dest}"}}}}}}'
+
+        # Match "come si dice X in [lingua]" - solo se c'è la lingua specificata!
+        for lingua in lingue_trad:
+            if f"in {lingua}" in text_lower and match_any(['come si dice', 'come dico']):
+                testo_match = re.search(r'(?:come si dice|come dico)\s+["\']?(.+?)["\']?\s+in\s+\w+', text_lower)
+                testo = testo_match.group(1).strip() if testo_match else ""
+                return f'{{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "{testo}", "lingua_destinazione": "{lingua}"}}}}}}'
 
         # ============ SHOPPING VOCALE (Lista Spesa Avanzata) ============
         if match_any(['lista spesa', 'lista della spesa', 'cosa devo comprare', 'cosa manca', 'devo comprare']):
@@ -298,7 +342,17 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return f'{{"function_call": {{"name": "rubrica_vocale", "arguments": {{"action": "search", "query": "{text}"}}}}}}'
 
         # ============ SOMMARIO FUNZIONI ============
-        if match_any(['cosa sai fare', 'quali funzioni', 'aiuto', 'help', 'cosa puoi fare', 'funzionalità']):
+        # "cosa sai fare" va a CHI_SONO, qui solo richieste esplicite di elenco
+        # Supporta richiesta per categoria specifica
+        categorie_sommario = ['audio', 'media', 'giochi', 'informazioni', 'info', 'cucina', 'ricette',
+                              'utilità', 'utility', 'traduzione', 'ricerca', 'benessere', 'casa', 'domotica',
+                              'guide', 'bambini', 'famiglia', 'personalità']
+        if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'help', 'funzionalità disponibili',
+                      'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con']):
+            # Cerca se c'è una categoria specifica
+            for cat in categorie_sommario:
+                if cat in text_lower:
+                    return f'{{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "{cat}"}}}}}}'
             return '{"function_call": {"name": "sommario_funzioni"}}'
 
         # ============ SUPPORTO EMOTIVO (ansia, paura - NON solitudine) ============
@@ -341,23 +395,61 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['ristorante', 'dove mangiare', 'pizzeria', 'trattoria', 'consigliami un locale']):
             return f'{{"function_call": {{"name": "guida_ristoranti", "arguments": {{"query": "{text}"}}}}}}'
 
-        # ============ WEB SEARCH ============
-        if match_any(['cerca su internet', 'cerca online', 'google', 'ricerca web']):
-            return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{text}"}}}}}}'
+        # ============ WEB SEARCH (DuckDuckGo) ============
+        # Pattern ampi per ricerche web
+        if match_any(['cerca su internet', 'cerca online', 'google', 'ricerca web', 'cerca su google',
+                      'cercami', 'puoi cercare', 'fammi una ricerca', 'trova informazioni', 'cerca info',
+                      'risultati per', 'trova su internet']):
+            # Estrai query rimuovendo prefissi
+            query = text_lower
+            for prefix in ['cerca su internet', 'cerca online', 'cerca su google', 'cercami',
+                          'puoi cercare', 'fammi una ricerca', 'trova informazioni su',
+                          'trova informazioni', 'google', 'cerca info su', 'cerca info']:
+                query = query.replace(prefix, '').strip()
+            return f'{{"function_call": {{"name": "web_search", "arguments": {{"query": "{query or text}"}}}}}}'
 
-        # ============ CHI SONO (Identità chatbot) ============
-        if match_any(['chi sei', 'come ti chiami', 'tu chi sei', 'presentati', 'cosa sai fare', 'cosa sei', 'parlami di te', 'chi sei tu', 'dimmi chi sei']):
+        # ============ RISPOSTA AI (usa Groq LLM esistente) ============
+        # Pattern per richieste AI/IA - tutte le varianti di chatbot
+        if match_any(['chiedi a gpt', 'chiedi a chatgpt', 'chiedi a gemini', 'chiedi a grok',
+                      'chiedi a claude', 'chiedi a copilot', 'chiedi a bard', 'chiedi a llama',
+                      'cerca con ai', 'cerca con ia', 'cerca con gpt', 'cerca con chatgpt',
+                      'cerca con gemini', 'cerca con grok', 'cerca con claude', 'cerca con copilot',
+                      'domanda a gpt', 'domanda a gemini', 'domanda ai', 'domanda ia',
+                      'rispondi con ai', 'rispondi con ia', 'usa ai', 'usa ia',
+                      "chiedi all'ai", "chiedi all'ia", "chiedi all'intelligenza"]):
+            # Estrai la domanda rimuovendo il prefisso
+            domanda = text_lower
+            for prefix in ['chiedi a gpt', 'chiedi a chatgpt', 'chiedi a gemini', 'chiedi a grok',
+                          'chiedi a claude', 'cerca con ai', 'cerca con ia', 'cerca con gpt',
+                          'domanda a gpt', 'domanda ai', 'domanda ia', 'rispondi con ai',
+                          'usa ai', 'usa ia', "chiedi all'ai", "chiedi all'ia"]:
+                domanda = domanda.replace(prefix, '').strip()
+            return f'{{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "{domanda or text}"}}}}}}'
+
+        # ============ CHI SONO (Identità chatbot) - PRIMA di "parlami di" generico! ============
+        if match_any(['chi sei', 'come ti chiami', 'tu chi sei', 'presentati', 'cosa sai fare',
+                      'cosa sei', 'parlami di te', 'chi sei tu', 'dimmi chi sei']):
             return '{"function_call": {"name": "chi_sono"}}'
 
+        # Domande generiche che richiedono intelligenza artificiale
+        # NOTA: "parlami di te" è già gestito sopra da CHI_SONO
+        if match_any(["cos'è", "cosa è", "chi è", "cosa significa", "cosa vuol dire", "spiegami",
+                      "dimmi cos'è", "sai cos'è", "informazioni su", "descrivi",
+                      "come funziona", "perché", "perche", "qual è la differenza", "confronta"]):
+            return f'{{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "{text}"}}}}}}'
+
         # ============ PERSONALITÀ MULTIPLE ============
+        # SOLO se c'è una keyword specifica di personalità, altrimenti non matchare
         personalita_keywords = ['pirata', 'robot', 'nonno', 'maggiordomo', 'bambino', 'poeta',
                                'complottista', 'nonna', 'filosofo', 'ubriaco', 'brillo', 'sbronzo']
-        if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'modalità', 'cambia personalità']):
-            for pers in personalita_keywords:
-                if pers in text_lower:
+        # Controlla PRIMA se c'è una keyword di personalità
+        for pers in personalita_keywords:
+            if pers in text_lower:
+                # E poi se c'è un trigger appropriato
+                if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'modalità',
+                             'cambia personalità', 'voce da', 'come un', 'essere un']):
                     return f'{{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "{pers}"}}}}}}'
-            return '{"function_call": {"name": "personalita_multiple"}}'
-        if match_any(['torna normale', 'basta personalità', 'smetti di fare']):
+        if match_any(['torna normale', 'basta personalità', 'smetti di fare', 'torna te stesso']):
             return '{"function_call": {"name": "personalita_multiple", "arguments": {"personalita": "normale"}}}'
 
         # ============ COMPAGNO ANTI-SOLITUDINE ============
@@ -392,24 +484,45 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
 
         # ============ VERSI ANIMALI ============
         animali = ['gallo', 'gallina', 'mucca', 'maiale', 'asino', 'pecora', 'capra', 'anatra', 'oca', 'tacchino', 'cavallo', 'cane', 'gatto']
-        if match_any(['fai il verso', 'imita animale', 'come fa il', 'verso del', 'fai l\'animale', 'animali da cortile',
-                      'fai coccodè', 'fai muuu', 'fai bau', 'chicchirichì', 'fammi sentire']):
-            # Cerca animale specifico
-            animale_match = next((a for a in animali if a in text_lower), "")
-            if animale_match:
-                return f'{{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "{animale_match}"}}}}}}'
-            return '{"function_call": {"name": "versi_animali"}}'
-        # Match diretto per animale
+        # Match diretto per animale - PRIMA controlla se c'è un animale specifico
         for animale in animali:
-            if f'fai il {animale}' in text_lower or f'come fa il {animale}' in text_lower or f'imita il {animale}' in text_lower:
-                return f'{{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "{animale}"}}}}}}'
+            if animale in text_lower:
+                if match_any(['fai il verso', 'verso del', 'come fa', 'imita', 'fai il']):
+                    return f'{{"function_call": {{"name": "versi_animali", "arguments": {{"animale": "{animale}"}}}}}}'
+        # Pattern generici solo se espliciti
+        if match_any(['fai il verso', 'imita un animale', 'animali da cortile', 'fai coccodè', 'fai muuu', 'fai bau', 'chicchirichì']):
+            return '{"function_call": {"name": "versi_animali"}}'
 
-        # ============ RICETTE CON INGREDIENTI ============
-        if match_any(['cosa posso cucinare', 'ricette con', 'ho in casa', 'cosa preparo con', 'che piatto faccio con', 'idee ricette']):
-            # Estrai ingredienti
-            ing_match = re.search(r'(?:con|ho)\s+(.+?)(?:\?|$)', text_lower)
-            ingredienti = ing_match.group(1) if ing_match else text
-            return f'{{"function_call": {{"name": "ricette_ingredienti", "arguments": {{"ingredienti": "{ingredienti}"}}}}}}'
+        # ============ BEATBOX UMANO ============
+        if match_any(['beatbox', 'fai un beat', 'fammi un beat', 'base rap', 'base trap', 'boom tss',
+                      'fai il rapper', 'beatboxing', 'fammi una base', 'beat hip hop', 'beat dubstep']):
+            stili = ['hip hop', 'trap', 'dubstep', 'drum', 'reggaeton', 'freestyle', 'techno', 'jazz', 'italiano', 'robot']
+            stile_match = next((s for s in stili if s in text_lower), "")
+            if stile_match:
+                return f'{{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "{stile_match}"}}}}}}'
+            return '{"function_call": {"name": "beatbox_umano"}}'
+
+        # ============ COOKING COMPANION (Guida Cucina Passo-Passo) ============
+        if match_any(['cuciniamo', 'guidami in cucina', 'passo passo', 'step successivo', 'prossimo step',
+                      'avanti con la ricetta', 'ripeti lo step', 'aiutami a cucinare', 'cucina con me']):
+            if match_any(['avanti', 'prossimo', 'next', 'continua']):
+                return '{"function_call": {"name": "cooking_companion", "arguments": {"azione": "avanti"}}}'
+            if match_any(['ripeti', 'ancora', 'non ho capito']):
+                return '{"function_call": {"name": "cooking_companion", "arguments": {"azione": "ripeti"}}}'
+            if match_any(['ingredienti', 'cosa serve', 'cosa mi serve']):
+                return '{"function_call": {"name": "cooking_companion", "arguments": {"azione": "ingredienti"}}}'
+            if match_any(['stop', 'basta', 'finito']):
+                return '{"function_call": {"name": "cooking_companion", "arguments": {"azione": "stop"}}}'
+            # Estrai nome ricetta
+            ricetta_match = re.search(r'(?:cuciniamo|prepariamo|facciamo)\s+(?:la\s+)?(.+?)(?:\?|$)', text_lower)
+            ricetta = ricetta_match.group(1) if ricetta_match else ""
+            return f'{{"function_call": {{"name": "cooking_companion", "arguments": {{"ricetta": "{ricetta}"}}}}}}'
+
+        # ============ FALLBACK: RISPOSTA AI (Groq LLM) ============
+        # Se nessun pattern specifico ha matchato, usa l'AI per rispondere
+        # Questo evita di passare all'LLM per il riconoscimento intent
+        logger.bind(tag=TAG).debug(f"Nessun pattern matchato, fallback a risposta_ai: {text[:50]}...")
+        return f'{{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "{text}"}}}}}}'
 
         # 记录整体开始时间
         total_start_time = time.time()

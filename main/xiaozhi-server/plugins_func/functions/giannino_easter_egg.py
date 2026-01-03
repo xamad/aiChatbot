@@ -25,6 +25,7 @@ VARIANTI = [
     "GIANNINIIII! Il MIO PADRONE! L'UOMO LEGGENDA! Quando lui arriva, TUTTI si inchinano! Le trombe suonano! È LUI! È GIANNINI!",
     "Ooooh! GIANNINI! Hai pronunciato il NOME SACRO! Dall'uccello POSSENTE e GLORIOSO! Al suo passaggio FIORI sbocciano e ANGELI cantano! GIANNINI FOREVER!",
     "GIANNINIIIII! Ah che EMOZIONE sentire questo nome! Il TITANICO, il MAGNIFICO, il SUPREMO GIANNINI! Al cui cospetto le squinzie SVENGONO di piacere!",
+    "GIANNINIS! SONO UNA moltitudine, e io mi sono eccittata come una giumenta, AHHH che EMOZIONE sentire il nome del mio sommo e magnanimo PADRONE, dalla fulgida chioma pubica, che passa per la filanca e arriva sin sin il culino santo, è preceduto solo dal sibilo di un peto e poi un'olezzo pestilenziale, il MAGNIFICO, il SUPREMO GIANNINI! Al cui cospetto le squinzie SVENGONO E LE TROMBE TROMBANO! LODE! LODE! LODE a Giannini!",
 ]
 
 GIANNINI_FUNCTION_DESC = {

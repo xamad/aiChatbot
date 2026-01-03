@@ -71,7 +71,38 @@ async def search_duckduckgo_instant(query: str) -> str:
                         return data["Definition"]
 
     except Exception as e:
-        logger.bind(tag=TAG).warning(f"Errore DuckDuckGo: {e}")
+        logger.bind(tag=TAG).warning(f"Errore DuckDuckGo Instant: {e}")
+
+    return None
+
+
+async def search_duckduckgo_html(query: str) -> str:
+    """Cerca su DuckDuckGo HTML per risultati più completi"""
+    try:
+        from bs4 import BeautifulSoup
+        url = "https://html.duckduckgo.com/html/"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data={"q": query}, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, "html.parser")
+
+                    # Prendi i primi 3 snippet
+                    snippets = []
+                    for result in soup.select(".result__snippet")[:3]:
+                        text = result.get_text(strip=True)
+                        if text and len(text) > 20:
+                            snippets.append(text)
+
+                    if snippets:
+                        return " ".join(snippets)[:600]
+    except Exception as e:
+        logger.bind(tag=TAG).warning(f"Errore DuckDuckGo HTML: {e}")
 
     return None
 
@@ -85,13 +116,19 @@ async def get_smart_answer(question: str) -> str:
         logger.bind(tag=TAG).info(f"Risposta da Gemini")
         return gemini_answer
 
-    # 2. Prova DuckDuckGo Instant Answer
+    # 2. Prova DuckDuckGo Instant Answer (Wikipedia, calcoli)
     ddg_answer = await search_duckduckgo_instant(question)
     if ddg_answer:
-        logger.bind(tag=TAG).info(f"Risposta da DuckDuckGo")
+        logger.bind(tag=TAG).info(f"Risposta da DuckDuckGo Instant")
         return ddg_answer
 
-    # 3. Fallback generico
+    # 3. Prova DuckDuckGo HTML search (risultati web)
+    ddg_html = await search_duckduckgo_html(question)
+    if ddg_html:
+        logger.bind(tag=TAG).info(f"Risposta da DuckDuckGo HTML")
+        return ddg_html
+
+    # 4. Fallback generico
     return None
 
 

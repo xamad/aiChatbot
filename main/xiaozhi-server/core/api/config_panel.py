@@ -77,16 +77,16 @@ MODELLI_DISPONIBILI = {
 
 # Categorie funzioni - nomi corrispondenti ai file in plugins_func/functions/
 CATEGORIE_FUNZIONI = {
-    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke", "play_music"]},
+    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke", "play_music", "beatbox_umano"]},
     "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno", "get_time", "get_weather"]},
     "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
     "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale", "allenamento_mentale"]},
-    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore_realtime", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale"]},
+    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore_realtime", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale", "memoria_personale"]},
     "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "shopping_vocale"]},
     "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "compagno_antisolitudine", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino", "suoni_ambiente"]},
     "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata"]},
-    "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
-    "ricerca": {"nome": "Ricerca", "icon": "🔍", "funzioni": ["web_search", "leggi_pagina", "risposta_intelligente"]},
+    "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "cooking_companion", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
+    "ricerca": {"nome": "Ricerca & AI", "icon": "🤖", "funzioni": ["web_search", "leggi_pagina", "risposta_ai"]},
 }
 
 def get_available_functions():
