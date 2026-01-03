@@ -1,12 +1,18 @@
 """
-Traduttore Real-Time - Traduzione vocale bidirezionale
-Modalità interprete per conversazioni tra lingue diverse
-Usa API gratuite per traduzione
+Traduttore Real-Time - Modalità Interprete Bidirezionale
+Traduzione vocale continua tra italiano e altre lingue.
+
+Uso:
+- "Avvia traduttore in cinese" → attiva modalità interprete
+- Parli italiano → tradotto in cinese
+- L'interlocutore parla cinese → tradotto in italiano
+- "Esci" / "Stop traduttore" → disattiva modalità
 """
 
 import re
 import aiohttp
 import asyncio
+import concurrent.futures
 from urllib.parse import quote
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
@@ -14,82 +20,113 @@ from plugins_func.register import register_function, ToolType, ActionResponse, A
 TAG = __name__
 logger = setup_logging()
 
+# Stato sessioni attive per device
+TRANSLATION_SESSIONS = {}
+
 # Lingue supportate
 LINGUE = {
-    "italiano": {"code": "it", "nome": "Italiano", "flag": "🇮🇹"},
-    "inglese": {"code": "en", "nome": "English", "flag": "🇬🇧"},
-    "francese": {"code": "fr", "nome": "Français", "flag": "🇫🇷"},
-    "spagnolo": {"code": "es", "nome": "Español", "flag": "🇪🇸"},
-    "tedesco": {"code": "de", "nome": "Deutsch", "flag": "🇩🇪"},
-    "portoghese": {"code": "pt", "nome": "Português", "flag": "🇵🇹"},
-    "russo": {"code": "ru", "nome": "Русский", "flag": "🇷🇺"},
-    "cinese": {"code": "zh", "nome": "中文", "flag": "🇨🇳"},
-    "giapponese": {"code": "ja", "nome": "日本語", "flag": "🇯🇵"},
-    "arabo": {"code": "ar", "nome": "العربية", "flag": "🇸🇦"},
-    "olandese": {"code": "nl", "nome": "Nederlands", "flag": "🇳🇱"},
-    "polacco": {"code": "pl", "nome": "Polski", "flag": "🇵🇱"},
-    "rumeno": {"code": "ro", "nome": "Română", "flag": "🇷🇴"},
-    "greco": {"code": "el", "nome": "Ελληνικά", "flag": "🇬🇷"},
-    "turco": {"code": "tr", "nome": "Türkçe", "flag": "🇹🇷"},
+    "italiano": {"code": "it", "nome": "Italiano", "flag": "🇮🇹", "script": "latin"},
+    "inglese": {"code": "en", "nome": "English", "flag": "🇬🇧", "script": "latin"},
+    "francese": {"code": "fr", "nome": "Français", "flag": "🇫🇷", "script": "latin"},
+    "spagnolo": {"code": "es", "nome": "Español", "flag": "🇪🇸", "script": "latin"},
+    "tedesco": {"code": "de", "nome": "Deutsch", "flag": "🇩🇪", "script": "latin"},
+    "portoghese": {"code": "pt", "nome": "Português", "flag": "🇵🇹", "script": "latin"},
+    "russo": {"code": "ru", "nome": "Русский", "flag": "🇷🇺", "script": "cyrillic"},
+    "cinese": {"code": "zh", "nome": "中文", "flag": "🇨🇳", "script": "chinese"},
+    "giapponese": {"code": "ja", "nome": "日本語", "flag": "🇯🇵", "script": "japanese"},
+    "coreano": {"code": "ko", "nome": "한국어", "flag": "🇰🇷", "script": "korean"},
+    "arabo": {"code": "ar", "nome": "العربية", "flag": "🇸🇦", "script": "arabic"},
+    "olandese": {"code": "nl", "nome": "Nederlands", "flag": "🇳🇱", "script": "latin"},
+    "polacco": {"code": "pl", "nome": "Polski", "flag": "🇵🇱", "script": "latin"},
+    "greco": {"code": "el", "nome": "Ελληνικά", "flag": "🇬🇷", "script": "greek"},
+    "turco": {"code": "tr", "nome": "Türkçe", "flag": "🇹🇷", "script": "latin"},
+    "hindi": {"code": "hi", "nome": "हिन्दी", "flag": "🇮🇳", "script": "devanagari"},
 }
 
 # Alias comuni
 ALIAS_LINGUE = {
-    "english": "inglese",
-    "french": "francese",
-    "spanish": "spagnolo",
-    "german": "tedesco",
-    "portuguese": "portoghese",
-    "russian": "russo",
-    "chinese": "cinese",
-    "japanese": "giapponese",
-    "arabic": "arabo",
-    "dutch": "olandese",
-    "polish": "polacco",
-    "romanian": "rumeno",
-    "greek": "greco",
-    "turkish": "turco",
+    "english": "inglese", "french": "francese", "spanish": "spagnolo",
+    "german": "tedesco", "portuguese": "portoghese", "russian": "russo",
+    "chinese": "cinese", "mandarin": "cinese", "japanese": "giapponese",
+    "korean": "coreano", "arabic": "arabo", "dutch": "olandese",
+    "polish": "polacco", "greek": "greco", "turkish": "turco",
 }
 
-# Stato sessione traduzione
-_sessione_attiva = None
+# Comandi per uscire dalla modalità traduzione
+EXIT_COMMANDS = [
+    "esci", "stop", "basta", "fine", "termina", "chiudi",
+    "stop traduttore", "esci dal traduttore", "disattiva traduttore",
+    "fine traduzione", "basta tradurre", "smetti di tradurre"
+]
 
 
-async def translate_text(text: str, source_lang: str, target_lang: str) -> str:
-    """Traduce testo usando MyMemory API (gratuito)"""
-    try:
-        # MyMemory API - gratuito, no auth
-        url = f"https://api.mymemory.translated.net/get?q={quote(text)}&langpair={source_lang}|{target_lang}"
+def get_session_id(conn) -> str:
+    """Ottieni ID sessione dal connection"""
+    if hasattr(conn, 'device_id') and conn.device_id:
+        return conn.device_id
+    if hasattr(conn, 'session_id') and conn.session_id:
+        return conn.session_id
+    return str(id(conn))
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("responseStatus") == 200:
-                        translation = data.get("responseData", {}).get("translatedText", "")
-                        return translation
 
-        # Fallback: LibreTranslate (se disponibile)
-        libre_url = "https://libretranslate.com/translate"
-        payload = {
-            "q": text,
-            "source": source_lang,
-            "target": target_lang
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(libre_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("translatedText", "")
+def detect_script(text: str) -> str:
+    """Rileva lo script/alfabeto del testo"""
+    text = text.strip()
+    if not text:
+        return "unknown"
 
-    except Exception as e:
-        logger.bind(tag=TAG).warning(f"Errore traduzione: {e}")
+    # Conta caratteri per tipo
+    chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    japanese_kana = sum(1 for c in text if '\u3040' <= c <= '\u30ff')
+    korean = sum(1 for c in text if '\uac00' <= c <= '\ud7af' or '\u1100' <= c <= '\u11ff')
+    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04ff')
+    arabic = sum(1 for c in text if '\u0600' <= c <= '\u06ff')
+    greek = sum(1 for c in text if '\u0370' <= c <= '\u03ff')
+    devanagari = sum(1 for c in text if '\u0900' <= c <= '\u097f')
+    latin = sum(1 for c in text if 'a' <= c.lower() <= 'z')
 
-    return None
+    total = len(text.replace(" ", ""))
+    if total == 0:
+        return "unknown"
+
+    # Determina script dominante (soglia 30%)
+    if chinese / total > 0.3:
+        return "chinese"
+    if japanese_kana / total > 0.2 or (chinese / total > 0.1 and japanese_kana > 0):
+        return "japanese"
+    if korean / total > 0.3:
+        return "korean"
+    if cyrillic / total > 0.3:
+        return "cyrillic"
+    if arabic / total > 0.3:
+        return "arabic"
+    if greek / total > 0.3:
+        return "greek"
+    if devanagari / total > 0.3:
+        return "devanagari"
+    if latin / total > 0.3:
+        return "latin"
+
+    return "unknown"
+
+
+def is_exit_command(text: str) -> bool:
+    """Verifica se il testo è un comando di uscita"""
+    text_lower = text.lower().strip()
+    # Rimuovi punteggiatura
+    text_clean = re.sub(r'[^\w\s]', '', text_lower)
+
+    for cmd in EXIT_COMMANDS:
+        if cmd in text_clean or text_clean == cmd:
+            return True
+    return False
 
 
 def get_lang_code(lingua: str) -> tuple:
     """Ottiene codice lingua e info"""
+    if not lingua:
+        return None, None
+
     lingua_lower = lingua.lower().strip()
 
     # Check alias
@@ -98,7 +135,7 @@ def get_lang_code(lingua: str) -> tuple:
 
     # Check diretto
     for nome, info in LINGUE.items():
-        if nome in lingua_lower or lingua_lower in nome:
+        if nome == lingua_lower or lingua_lower in nome or nome in lingua_lower:
             return info["code"], info
         if info["code"] == lingua_lower:
             return info["code"], info
@@ -106,102 +143,136 @@ def get_lang_code(lingua: str) -> tuple:
     return None, None
 
 
-TRADUTTORE_REALTIME_FUNCTION_DESC = {
-    "type": "function",
-    "function": {
-        "name": "traduttore_realtime",
-        "description": (
-            "实时翻译 / Traduttore vocale real-time. Traduce frasi tra lingue diverse. "
-            "Supporta: italiano, inglese, francese, spagnolo, tedesco, portoghese, russo, cinese, giapponese, arabo. "
-            "Use when: 'traduci in', 'come si dice in', 'traduzione', 'in inglese', "
-            "'parla inglese', 'modalità interprete', 'traduttore', 'traduci questo'"
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "testo": {
-                    "type": "string",
-                    "description": "Testo da tradurre"
-                },
-                "lingua_destinazione": {
-                    "type": "string",
-                    "description": "Lingua di destinazione (inglese, francese, spagnolo, ecc.)"
-                },
-                "lingua_origine": {
-                    "type": "string",
-                    "description": "Lingua di origine (default: italiano)"
-                }
-            },
-            "required": []
-        }
+def get_lang_by_script(script: str) -> tuple:
+    """Ottieni lingua dal tipo di script"""
+    script_to_lang = {
+        "chinese": ("zh", LINGUE["cinese"]),
+        "japanese": ("ja", LINGUE["giapponese"]),
+        "korean": ("ko", LINGUE["coreano"]),
+        "cyrillic": ("ru", LINGUE["russo"]),
+        "arabic": ("ar", LINGUE["arabo"]),
+        "greek": ("el", LINGUE["greco"]),
+        "devanagari": ("hi", LINGUE["hindi"]),
     }
-}
+    return script_to_lang.get(script, (None, None))
 
 
-@register_function('traduttore_realtime', TRADUTTORE_REALTIME_FUNCTION_DESC, ToolType.WAIT)
-def traduttore_realtime(conn, testo: str = None, lingua_destinazione: str = None, lingua_origine: str = "italiano"):
-    """Traduttore real-time"""
-    global _sessione_attiva
+async def translate_text(text: str, source_lang: str, target_lang: str) -> str:
+    """Traduce testo usando MyMemory API"""
+    try:
+        url = f"https://api.mymemory.translated.net/get?q={quote(text)}&langpair={source_lang}|{target_lang}"
 
-    # Se non c'è testo, mostra lingue disponibili
-    if not testo and not lingua_destinazione:
-        lingue_list = "\n".join([f"{info['flag']} {nome.capitalize()}" for nome, info in LINGUE.items()])
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("responseStatus") == 200:
+                        translation = data.get("responseData", {}).get("translatedText", "")
+                        # Pulisci traduzione
+                        if translation:
+                            translation = translation.strip()
+                            # MyMemory a volte ritorna in maiuscolo
+                            if translation.isupper() and len(translation) > 3:
+                                translation = translation.capitalize()
+                        return translation
+
+        logger.bind(tag=TAG).warning("MyMemory API fallita, nessun fallback disponibile")
+        return None
+
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore traduzione: {e}")
+        return None
+
+
+def do_translate(text: str, source_lang: str, target_lang: str) -> str:
+    """Esegue traduzione gestendo contesto sync/async"""
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, translate_text(text, source_lang, target_lang))
+                return future.result(timeout=15)
+        except RuntimeError:
+            return asyncio.run(translate_text(text, source_lang, target_lang))
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore do_translate: {e}")
+        return None
+
+
+def is_translation_active(conn) -> bool:
+    """Verifica se la modalità traduzione è attiva"""
+    session_id = get_session_id(conn)
+    return session_id in TRANSLATION_SESSIONS and TRANSLATION_SESSIONS[session_id].get("active", False)
+
+
+def get_translation_session(conn) -> dict:
+    """Ottieni sessione traduzione attiva"""
+    session_id = get_session_id(conn)
+    return TRANSLATION_SESSIONS.get(session_id)
+
+
+def handle_translation_mode(conn, text: str) -> ActionResponse:
+    """
+    Gestisce input quando modalità traduzione è attiva.
+    Chiamato da intentHandler quando is_translation_active() è True.
+    """
+    session_id = get_session_id(conn)
+    session = TRANSLATION_SESSIONS.get(session_id)
+
+    if not session:
+        return None
+
+    # Check comando uscita
+    if is_exit_command(text):
+        TRANSLATION_SESSIONS.pop(session_id, None)
+        logger.bind(tag=TAG).info(f"Modalità traduzione disattivata per {session_id}")
         return ActionResponse(
             action=Action.RESPONSE,
-            result=f"🌍 Traduttore Real-Time\n\nLingue disponibili:\n{lingue_list}\n\nDimmi: 'traduci [frase] in [lingua]'",
-            response="Sono il traduttore! Dimmi cosa vuoi tradurre e in quale lingua. Per esempio: traduci ciao come stai in inglese."
+            result="🔇 Modalità interprete disattivata",
+            response="Modalità interprete disattivata. Tornato alla conversazione normale."
         )
 
-    # Default lingua destinazione
-    if not lingua_destinazione:
-        lingua_destinazione = "inglese"
+    target_code = session["target_code"]
+    target_info = session["target_info"]
+    source_code = session["source_code"]  # italiano di default
+    source_info = session["source_info"]
 
-    # Ottieni codici lingua
-    dest_code, dest_info = get_lang_code(lingua_destinazione)
-    orig_code, orig_info = get_lang_code(lingua_origine)
+    # Rileva lingua del testo parlato
+    detected_script = detect_script(text)
+    target_script = target_info.get("script", "unknown")
 
-    if not dest_code:
-        return ActionResponse(
-            action=Action.RESPONSE,
-            result=f"Lingua '{lingua_destinazione}' non riconosciuta",
-            response=f"Non conosco la lingua {lingua_destinazione}. Prova con inglese, francese, spagnolo, tedesco..."
-        )
+    logger.bind(tag=TAG).debug(f"Script rilevato: {detected_script}, target script: {target_script}")
 
-    if not orig_code:
-        orig_code = "it"
-        orig_info = LINGUE["italiano"]
+    # Determina direzione traduzione
+    if detected_script == target_script and detected_script != "latin":
+        # Testo nella lingua target → traduci in italiano
+        from_code = target_code
+        from_info = target_info
+        to_code = source_code
+        to_info = source_info
+        direction = "incoming"  # dall'interlocutore
+    else:
+        # Testo italiano (o latino) → traduci nella lingua target
+        from_code = source_code
+        from_info = source_info
+        to_code = target_code
+        to_info = target_info
+        direction = "outgoing"  # verso l'interlocutore
 
-    # Se non c'è testo, estrai dal contesto
-    if not testo:
-        return ActionResponse(
-            action=Action.RESPONSE,
-            result="Cosa vuoi tradurre?",
-            response=f"Cosa vuoi tradurre in {lingua_destinazione}?"
-        )
-
-    logger.bind(tag=TAG).info(f"Traduzione: '{testo}' da {orig_code} a {dest_code}")
+    logger.bind(tag=TAG).info(f"Traduzione {direction}: '{text[:50]}...' da {from_code} a {to_code}")
 
     # Esegui traduzione
-    try:
-        loop = asyncio.get_event_loop()
-        traduzione = loop.run_until_complete(translate_text(testo, orig_code, dest_code))
-    except:
-        try:
-            traduzione = asyncio.run(translate_text(testo, orig_code, dest_code))
-        except:
-            traduzione = None
+    traduzione = do_translate(text, from_code, to_code)
 
     if traduzione:
-        result = f"""🌍 Traduzione {orig_info['flag']} → {dest_info['flag']}
-
-📝 Originale ({orig_info['nome']}):
-{testo}
-
-✨ Traduzione ({dest_info['nome']}):
-{traduzione}"""
-
-        # Per il parlato, pronuncia la traduzione
-        spoken = f"In {lingua_destinazione}: {traduzione}"
+        if direction == "incoming":
+            # Risposta dall'interlocutore → leggi traduzione italiana
+            result = f"{target_info['flag']} → 🇮🇹\n\n{text}\n\n📢 {traduzione}"
+            spoken = traduzione  # Il chatbot parla la traduzione italiana
+        else:
+            # Tu parli italiano → mostra e leggi traduzione
+            result = f"🇮🇹 → {target_info['flag']}\n\n{text}\n\n📢 {traduzione}"
+            spoken = traduzione  # Il chatbot pronuncia nella lingua target
 
         return ActionResponse(
             action=Action.RESPONSE,
@@ -211,55 +282,160 @@ def traduttore_realtime(conn, testo: str = None, lingua_destinazione: str = None
     else:
         return ActionResponse(
             action=Action.RESPONSE,
-            result="Errore nella traduzione",
+            result="⚠️ Traduzione non riuscita",
+            response="Non sono riuscito a tradurre. Riprova."
+        )
+
+
+# Descrizione funzione per intent
+TRADUTTORE_REALTIME_FUNCTION_DESC = {
+    "type": "function",
+    "function": {
+        "name": "traduttore_realtime",
+        "description": (
+            "Traduttore vocale real-time / Modalità interprete. "
+            "Attiva traduzione bidirezionale continua. "
+            "Use when: 'avvia traduttore', 'modalità interprete', 'traduci in tempo reale', "
+            "'parla con qualcuno in [lingua]', 'aiutami a comunicare in [lingua]', "
+            "'traduci in', 'come si dice in', 'traduzione'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "testo": {
+                    "type": "string",
+                    "description": "Testo da tradurre (opzionale per attivazione modalità)"
+                },
+                "lingua_destinazione": {
+                    "type": "string",
+                    "description": "Lingua di destinazione (inglese, cinese, francese, ecc.)"
+                },
+                "lingua_origine": {
+                    "type": "string",
+                    "description": "Lingua di origine (default: italiano)"
+                },
+                "modalita": {
+                    "type": "string",
+                    "enum": ["singola", "continua"],
+                    "description": "singola = traduzione singola, continua = modalità interprete"
+                }
+            },
+            "required": []
+        }
+    }
+}
+
+
+@register_function('traduttore_realtime', TRADUTTORE_REALTIME_FUNCTION_DESC, ToolType.WAIT)
+def traduttore_realtime(conn, testo: str = None, lingua_destinazione: str = None,
+                        lingua_origine: str = "italiano", modalita: str = None):
+    """
+    Traduttore real-time con modalità interprete.
+
+    Se chiamato senza testo specifico o con frasi come "avvia traduttore in cinese":
+    → Attiva modalità interprete continua
+
+    Se chiamato con testo specifico:
+    → Traduzione singola
+    """
+    session_id = get_session_id(conn)
+
+    # Determina se attivare modalità continua
+    activate_continuous = False
+
+    # Pattern che indicano richiesta di modalità continua
+    if testo:
+        testo_lower = testo.lower()
+        continuous_patterns = [
+            "avvia", "attiva", "inizia", "modalità interprete", "tempo reale",
+            "continua", "parla con", "aiutami a comunicare", "fai da interprete"
+        ]
+        for pattern in continuous_patterns:
+            if pattern in testo_lower:
+                activate_continuous = True
+                break
+
+    # Se non c'è testo ma c'è lingua, probabilmente vuole attivare
+    if not testo and lingua_destinazione:
+        activate_continuous = True
+
+    # Modalità esplicita
+    if modalita == "continua":
+        activate_continuous = True
+
+    # Ottieni codici lingua
+    dest_code, dest_info = get_lang_code(lingua_destinazione) if lingua_destinazione else (None, None)
+    orig_code, orig_info = get_lang_code(lingua_origine)
+
+    if not orig_code:
+        orig_code = "it"
+        orig_info = LINGUE["italiano"]
+
+    # Se non abbiamo lingua destinazione, mostra help
+    if not dest_code:
+        lingue_list = ", ".join([f"{info['flag']} {nome}" for nome, info in LINGUE.items() if nome != "italiano"])
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result=f"🌍 Traduttore Real-Time\n\nLingue: {lingue_list}\n\nDì 'avvia traduttore in [lingua]' per la modalità interprete.",
+            response="In quale lingua vuoi tradurre? Posso fare da interprete in inglese, cinese, francese, spagnolo, tedesco e molte altre."
+        )
+
+    # ATTIVA MODALITÀ CONTINUA
+    if activate_continuous:
+        TRANSLATION_SESSIONS[session_id] = {
+            "active": True,
+            "target_code": dest_code,
+            "target_info": dest_info,
+            "source_code": orig_code,
+            "source_info": orig_info,
+            "target_name": lingua_destinazione
+        }
+
+        logger.bind(tag=TAG).info(f"Modalità interprete attivata: {orig_code} ↔ {dest_code} per {session_id}")
+
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result=f"🎙️ MODALITÀ INTERPRETE ATTIVA\n\n{orig_info['flag']} Italiano ↔ {dest_info['flag']} {dest_info['nome']}\n\nParla in italiano → traduco in {lingua_destinazione}\nL'interlocutore parla {lingua_destinazione} → traduco in italiano\n\nDì 'esci' per terminare.",
+            response=f"Modalità interprete attivata! Italiano e {lingua_destinazione}. Parla pure, traduco tutto. Dì esci quando hai finito."
+        )
+
+    # TRADUZIONE SINGOLA
+    if not testo:
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result="Cosa vuoi tradurre?",
+            response=f"Cosa vuoi tradurre in {lingua_destinazione}?"
+        )
+
+    # Pulisci testo da pattern di attivazione
+    testo_clean = testo
+    for pattern in ["traduci", "traduzione", "in " + (lingua_destinazione or ""), "come si dice"]:
+        testo_clean = re.sub(rf'\b{pattern}\b', '', testo_clean, flags=re.IGNORECASE)
+    testo_clean = testo_clean.strip()
+
+    if not testo_clean or len(testo_clean) < 2:
+        testo_clean = testo  # Usa testo originale se troppo corto dopo pulizia
+
+    logger.bind(tag=TAG).info(f"Traduzione singola: '{testo_clean}' da {orig_code} a {dest_code}")
+
+    traduzione = do_translate(testo_clean, orig_code, dest_code)
+
+    if traduzione:
+        result = f"{orig_info['flag']} → {dest_info['flag']}\n\n📝 {testo_clean}\n\n✨ {traduzione}"
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result=result,
+            response=f"In {lingua_destinazione}: {traduzione}"
+        )
+    else:
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result="Errore traduzione",
             response="Mi dispiace, non sono riuscito a tradurre. Riprova!"
         )
 
 
-# Funzione helper per frasi comuni
-FRASI_UTILI = {
-    "inglese": {
-        "ciao": "Hello",
-        "grazie": "Thank you",
-        "per favore": "Please",
-        "scusa": "Excuse me / Sorry",
-        "quanto costa": "How much does it cost?",
-        "dov'è il bagno": "Where is the bathroom?",
-        "non capisco": "I don't understand",
-        "parla italiano": "Do you speak Italian?",
-        "aiuto": "Help!",
-        "buongiorno": "Good morning",
-        "buonasera": "Good evening",
-        "arrivederci": "Goodbye",
-    },
-    "francese": {
-        "ciao": "Bonjour / Salut",
-        "grazie": "Merci",
-        "per favore": "S'il vous plaît",
-        "scusa": "Excusez-moi / Pardon",
-        "quanto costa": "Combien ça coûte?",
-        "dov'è il bagno": "Où sont les toilettes?",
-        "non capisco": "Je ne comprends pas",
-        "parla italiano": "Parlez-vous italien?",
-    },
-    "spagnolo": {
-        "ciao": "Hola",
-        "grazie": "Gracias",
-        "per favore": "Por favor",
-        "scusa": "Perdón / Disculpe",
-        "quanto costa": "¿Cuánto cuesta?",
-        "dov'è il bagno": "¿Dónde está el baño?",
-        "non capisco": "No entiendo",
-        "parla italiano": "¿Habla italiano?",
-    },
-    "tedesco": {
-        "ciao": "Hallo / Guten Tag",
-        "grazie": "Danke",
-        "per favore": "Bitte",
-        "scusa": "Entschuldigung",
-        "quanto costa": "Was kostet das?",
-        "dov'è il bagno": "Wo ist die Toilette?",
-        "non capisco": "Ich verstehe nicht",
-        "parla italiano": "Sprechen Sie Italienisch?",
-    },
-}
+def deactivate_translation(conn):
+    """Disattiva modalità traduzione (utility)"""
+    session_id = get_session_id(conn)
+    TRANSLATION_SESSIONS.pop(session_id, None)

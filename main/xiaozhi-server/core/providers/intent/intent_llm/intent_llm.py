@@ -136,6 +136,34 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         def match_any(keywords):
             return any(kw in text_lower for kw in keywords)
 
+        # ============ GESTIONE PROFILI SKILL ============
+        # NOTA: "modalità interprete" va a TRADUTTORE, "attiva modalità [profilo]" va qui
+        # Escludiamo esplicitamente "interprete" dal match "attiva modalità" per evitare conflitti
+        is_profile_request = match_any(['cambia profilo', 'attiva profilo', 'modalità assistente',
+                      'che profilo', 'quale profilo', 'quali profili', 'profili disponibili', 'lista profili'])
+        # "attiva modalità X" solo se X non è "interprete" (quello va a traduttore)
+        if 'attiva modalità' in text_lower and 'interprete' not in text_lower:
+            is_profile_request = True
+
+        if is_profile_request:
+            # Estrai nome profilo se presente
+            profili = ['generale', 'anziani', 'bambini', 'intrattenimento', 'produttivita', 'produttività',
+                       'cultura', 'benessere', 'smart_home', 'domotica', 'interprete', 'cucina', 'notte']
+            profilo_trovato = ""
+            for p in profili:
+                if p in text_lower:
+                    profilo_trovato = p
+                    break
+
+            if match_any(['che profilo', 'quale profilo', 'profilo attivo', 'sono in che']):
+                return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "stato"}}}'
+            elif match_any(['quali profili', 'profili disponibili', 'elenco profili', 'lista profili']):
+                return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "lista"}}}'
+            elif profilo_trovato:
+                return f'{{"function_call": {{"name": "cambia_profilo", "arguments": {{"azione": "cambia", "profilo": "{profilo_trovato}"}}}}}}'
+            else:
+                return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "lista"}}}'
+
         # ============ RADIO ============
         if match_any(['sintonizza', 'metti radio', 'ascolta radio', 'accendi radio']) or \
            (match_any(['radio']) and match_any(['deejay', 'zeta', 'capital', 'm2o', 'italia', 'rai', '105', 'virgin', 'kiss', 'rtl'])):
@@ -254,7 +282,17 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
 
         # ============ TRADUTTORE REALTIME ============
         # Pattern specifici per evitare conflitti
-        lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo', 'greco', 'olandese', 'polacco']
+        lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo', 'greco', 'olandese', 'polacco', 'coreano', 'turco', 'hindi']
+
+        # MODALITÀ INTERPRETE CONTINUA: "avvia traduttore in X", "modalità interprete X"
+        if match_any(['avvia traduttore', 'attiva traduttore', 'modalità interprete', 'fai da interprete', 'aiutami a comunicare']):
+            lingua_dest = "inglese"
+            for lingua in lingue_trad:
+                if lingua in text_lower:
+                    lingua_dest = lingua
+                    break
+            return f'{{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "{text}", "lingua_destinazione": "{lingua_dest}", "modalita": "continua"}}}}}}'
+
         # Match esplicito: "traduci X in Y" o "come si dice X in Y"
         if match_any(['traduci ', 'traduzione ', 'tradurre ', 'traduttore']):
             # Estrai lingua destinazione

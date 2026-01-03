@@ -11,6 +11,13 @@ services:
     environment:
       - TZ=Europe/Rome
     network_mode: host
+    # Healthcheck: verifica che il server HTTP risponda (usa Python perché curl non è nel container)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/xiaozhi/ota/', timeout=5)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     volumes:
       # 配置文件目录
       - ./data:/opt/xiaozhi-esp32-server/data

@@ -23,8 +23,32 @@ async def handle_user_intent(conn, text):
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # 检查是否有明确的退出命令
     _, filtered_text = remove_punctuation_and_length(text)
+
+    # === MODALITÀ INTERPRETE/TRADUZIONE ===
+    # PRIORITÀ: Se la modalità traduzione è attiva, intercetta TUTTO il testo
+    # (inclusi comandi di uscita che vengono gestiti internamente)
+    try:
+        from plugins_func.functions.traduttore_realtime import is_translation_active, handle_translation_mode
+        if is_translation_active(conn):
+            conn.logger.bind(tag=TAG).debug("Modalità traduzione attiva - intercettando messaggio")
+            conn.sentence_id = str(uuid.uuid4().hex)
+            result = handle_translation_mode(conn, text)
+            if result:
+                await send_stt_message(conn, text)
+                conn.client_abort = False
+                # Esegui risposta in thread separato
+                def process_translation():
+                    conn.dialogue.put(Message(role="user", content=text))
+                    speak_txt(conn, result.response)
+                conn.executor.submit(process_translation)
+                return True
+    except ImportError:
+        pass
+    except Exception as e:
+        conn.logger.bind(tag=TAG).error(f"Errore modalità traduzione: {e}")
+
+    # 检查是否有明确的退出命令
     if await check_direct_exit(conn, filtered_text):
         return True
 
