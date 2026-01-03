@@ -50,6 +50,19 @@ MQTT_TOPIC_ROOT = os.environ.get("MQTT_TOPIC", "msh")
 MQTT_USERNAME = os.environ.get("MQTT_USER", "")  # Locale non richiede auth
 MQTT_PASSWORD = os.environ.get("MQTT_PASS", "")
 
+# ============ CONFIGURAZIONE CANALI ============
+# Il TUO node ID (4 caratteri, es: !a1b2)
+MY_NODE_ID = os.environ.get("MESHTASTIC_NODE_ID", "!xxxx")  # DA CONFIGURARE!
+
+# Canali da monitorare SEMPRE
+MONITORED_CHANNELS = ["Asti"]  # Canale locale privato
+
+# Canale pubblico congestionato - solo per invio/risposta temporanea
+PUBLIC_CHANNEL = "MediumFast"  # NON monitorato di default
+
+# Timeout monitoraggio canale pubblico dopo invio (secondi)
+PUBLIC_CHANNEL_TIMEOUT = 600  # 10 minuti - non blocca, solo monitora
+
 # HTTP Settings (se MESHTASTIC_MODE = "http")
 MESHTASTIC_HTTP_HOST = os.environ.get("MESHTASTIC_HTTP", "http://192.168.1.100")
 
@@ -80,11 +93,14 @@ class MeshMessage:
     """Rappresenta un messaggio mesh"""
     from_node: str
     from_name: str
-    to_node: str  # "broadcast" per tutti
+    to_node: str  # "broadcast" per tutti, o node_id per DM
     text: str
     timestamp: datetime
-    channel: int = 0
+    channel_name: str = "unknown"  # Nome canale (Asti, MediumFast, etc)
+    channel_index: int = 0
     is_read: bool = False
+    is_direct: bool = False  # True se è un DM al mio nodo
+    is_mention: bool = False  # True se menziona il mio nodo
 
 
 # ============ GLOBAL STATE ============
@@ -92,8 +108,14 @@ class MeshMessage:
 # Cache dei nodi conosciuti
 _known_nodes: Dict[str, MeshNode] = {}
 
-# Coda messaggi ricevuti (non letti)
-_message_queue: List[MeshMessage] = []
+# Code messaggi separate per priorità
+_dm_queue: List[MeshMessage] = []  # Messaggi diretti - SEMPRE notificati
+_asti_queue: List[MeshMessage] = []  # Canale Asti - monitorato
+_public_queue: List[MeshMessage] = []  # MediumFast - solo temporaneo
+
+# Stato monitoraggio canale pubblico
+_monitoring_public = False
+_public_monitor_until: Optional[datetime] = None
 
 # Client MQTT (se usato)
 _mqtt_client = None
@@ -102,18 +124,26 @@ _mqtt_client = None
 # ============ MQTT HANDLER ============
 
 class MeshtasticMQTTHandler:
-    """Gestisce connessione MQTT a Meshtastic"""
+    """
+    Gestisce connessione MQTT a Meshtastic con filtering canali.
+
+    Logica:
+    - DM (messaggi diretti al mio nodo): SEMPRE monitorati
+    - Canale "Asti": SEMPRE monitorato
+    - Canale "MediumFast": Solo temporaneamente dopo invio messaggio
+    """
 
     def __init__(self):
         self.client = None
         self.connected = False
+        self.my_node_id = MY_NODE_ID
 
     async def connect(self):
         """Connetti al broker MQTT"""
         try:
             import paho.mqtt.client as mqtt
 
-            self.client = mqtt.Client()
+            self.client = mqtt.Client(client_id="xiaozhi-chatbot")
 
             if MQTT_USERNAME:
                 self.client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
@@ -125,6 +155,8 @@ class MeshtasticMQTTHandler:
             self.client.loop_start()
 
             logger.bind(tag=TAG).info(f"Connesso a MQTT broker {MQTT_BROKER}:{MQTT_PORT}")
+            logger.bind(tag=TAG).info(f"My node ID: {self.my_node_id}")
+            logger.bind(tag=TAG).info(f"Canali monitorati: {MONITORED_CHANNELS}")
             return True
 
         except Exception as e:
@@ -136,51 +168,122 @@ class MeshtasticMQTTHandler:
         if rc == 0:
             self.connected = True
             # Sottoscrivi a tutti i topic meshtastic
+            # Formato: msh/EU_868/2/json/[channel]/[gateway_id]
             client.subscribe(f"{MQTT_TOPIC_ROOT}/#")
-            logger.bind(tag=TAG).info("Sottoscritto a topic Meshtastic")
+            logger.bind(tag=TAG).info("Sottoscritto a topic Meshtastic - filtraggio attivo")
         else:
             logger.bind(tag=TAG).error(f"Connessione MQTT fallita: {rc}")
 
     def _on_message(self, client, userdata, msg):
-        """Callback messaggi MQTT"""
+        """
+        Callback messaggi MQTT con filtering canali.
+
+        Topic format: msh/EU_868/2/json/[channel]/[gateway_id]
+        Oppure: msh/EU_868/2/e/[channel]/[gateway_id] (encrypted)
+        """
         try:
             topic = msg.topic
             payload = json.loads(msg.payload.decode())
 
-            # Parsing topic meshtastic
-            # Formato: meshtastic/2/json/LongFast/!nodeId
+            # Estrai canale dal topic
+            # Esempio: msh/EU_868/2/json/Asti/!a1b2c3d4
             parts = topic.split("/")
+            channel_name = "unknown"
+            if len(parts) >= 5:
+                channel_name = parts[4]  # Il nome del canale
 
-            if "text" in topic.lower() or "message" in str(payload).lower():
-                # Messaggio testuale ricevuto
-                self._handle_text_message(payload)
-            elif "nodeinfo" in topic.lower():
-                # Info nodo aggiornata
+            # Determina tipo messaggio dal topic
+            if "/json/" in topic or "/e/" in topic:
+                if "text" in str(payload).lower() or "payload" in payload:
+                    self._handle_text_message(payload, channel_name, topic)
+
+            if "nodeinfo" in topic.lower() or "user" in str(payload).lower():
                 self._handle_nodeinfo(payload)
             elif "position" in topic.lower():
-                # Posizione nodo
                 self._handle_position(payload)
 
+        except json.JSONDecodeError:
+            # Messaggio non JSON (es. protobuf raw) - ignora
+            pass
         except Exception as e:
             logger.bind(tag=TAG).warning(f"Errore parsing MQTT: {e}")
 
-    def _handle_text_message(self, payload: dict):
-        """Gestisce messaggio testuale ricevuto"""
-        global _message_queue
+    def _handle_text_message(self, payload: dict, channel_name: str, topic: str):
+        """
+        Gestisce messaggio testuale con filtering intelligente.
+
+        Regole:
+        1. DM al mio nodo → SEMPRE accettato, priorità alta
+        2. Canale "Asti" → SEMPRE accettato
+        3. Canale "MediumFast" → Solo se sto monitorando temporaneamente
+        4. Menzione del mio nodo → SEMPRE accettato
+        """
+        global _dm_queue, _asti_queue, _public_queue, _monitoring_public, _public_monitor_until
 
         try:
+            from_node = str(payload.get("from", payload.get("sender", "unknown")))
+            to_node = str(payload.get("to", "broadcast"))
+            text = payload.get("text", payload.get("payload", ""))
+
+            if not text:
+                return
+
+            # Determina se è un DM al mio nodo
+            is_direct = to_node == self.my_node_id or to_node == self.my_node_id.replace("!", "")
+
+            # Determina se menziona il mio nodo
+            is_mention = self.my_node_id in text or self.my_node_id.replace("!", "") in text
+
             msg = MeshMessage(
-                from_node=payload.get("from", "unknown"),
-                from_name=payload.get("sender", payload.get("from", "Sconosciuto")),
-                to_node=payload.get("to", "broadcast"),
-                text=payload.get("text", payload.get("payload", "")),
+                from_node=from_node,
+                from_name=payload.get("sender_short_name", payload.get("from", "Sconosciuto")),
+                to_node=to_node,
+                text=text,
                 timestamp=datetime.now(),
-                channel=payload.get("channel", 0),
-                is_read=False
+                channel_name=channel_name,
+                channel_index=payload.get("channel", 0),
+                is_read=False,
+                is_direct=is_direct,
+                is_mention=is_mention
             )
 
-            _message_queue.append(msg)
-            logger.bind(tag=TAG).info(f"Nuovo messaggio mesh da {msg.from_name}: {msg.text[:50]}...")
+            # ========== ROUTING MESSAGGI ==========
+
+            # 1. DM o menzione → sempre accettato, coda prioritaria
+            if is_direct or is_mention:
+                _dm_queue.append(msg)
+                logger.bind(tag=TAG).info(
+                    f"📨 DM/Menzione da {msg.from_name}: {msg.text[:50]}..."
+                )
+                return
+
+            # 2. Canale Asti → sempre accettato
+            if channel_name in MONITORED_CHANNELS:
+                _asti_queue.append(msg)
+                logger.bind(tag=TAG).info(
+                    f"📻 [{channel_name}] {msg.from_name}: {msg.text[:50]}..."
+                )
+                return
+
+            # 3. Canale pubblico → solo se monitoraggio attivo
+            if channel_name == PUBLIC_CHANNEL:
+                # Controlla se stiamo monitorando
+                if _monitoring_public and _public_monitor_until:
+                    if datetime.now() < _public_monitor_until:
+                        _public_queue.append(msg)
+                        logger.bind(tag=TAG).debug(
+                            f"📡 [{PUBLIC_CHANNEL}] {msg.from_name}: {msg.text[:30]}..."
+                        )
+                    else:
+                        # Timeout scaduto, disattiva monitoraggio
+                        _monitoring_public = False
+                        _public_monitor_until = None
+                        logger.bind(tag=TAG).info(f"Monitoraggio {PUBLIC_CHANNEL} terminato")
+                # Altrimenti ignora silenziosamente
+                return
+
+            # 4. Altri canali → ignora
+            logger.bind(tag=TAG).debug(f"Ignorato messaggio da canale: {channel_name}")
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Errore parsing messaggio: {e}")
@@ -235,29 +338,67 @@ class MeshtasticMQTTHandler:
         except Exception as e:
             logger.bind(tag=TAG).error(f"Errore parsing position: {e}")
 
-    async def send_message(self, text: str, to_node: str = "broadcast") -> bool:
-        """Invia messaggio alla mesh"""
+    async def send_message(
+        self,
+        text: str,
+        to_node: str = "broadcast",
+        channel: str = None
+    ) -> bool:
+        """
+        Invia messaggio alla mesh.
+
+        Args:
+            text: Messaggio da inviare
+            to_node: ID destinatario o "broadcast"
+            channel: Canale su cui inviare (None = Asti, "public" = MediumFast)
+        """
+        global _monitoring_public, _public_monitor_until
+
         if not self.connected:
             return False
 
         try:
-            topic = f"{MQTT_TOPIC_ROOT}/2/json/LongFast/!ffffffff"
+            # Determina canale
+            if channel == "public" or channel == PUBLIC_CHANNEL:
+                channel_name = PUBLIC_CHANNEL
+                # Attiva monitoraggio temporaneo per risposte
+                _monitoring_public = True
+                _public_monitor_until = datetime.now() + timedelta(seconds=PUBLIC_CHANNEL_TIMEOUT)
+                logger.bind(tag=TAG).info(
+                    f"Monitoraggio {PUBLIC_CHANNEL} attivato per {PUBLIC_CHANNEL_TIMEOUT//60} min"
+                )
+            else:
+                # Default: canale Asti
+                channel_name = MONITORED_CHANNELS[0] if MONITORED_CHANNELS else "Asti"
+
+            # Topic Meshtastic: msh/[region]/2/json/[channel]/[my_node_id]
+            topic = f"{MQTT_TOPIC_ROOT}/EU_868/2/json/{channel_name}/{self.my_node_id}"
+
             payload = {
+                "from": self.my_node_id,
                 "text": text,
-                "to": to_node
+                "type": "text"
             }
 
+            if to_node != "broadcast":
+                payload["to"] = to_node
+
             self.client.publish(topic, json.dumps(payload))
-            logger.bind(tag=TAG).info(f"Messaggio inviato a mesh: {text[:50]}...")
+            logger.bind(tag=TAG).info(
+                f"📤 Inviato su [{channel_name}] → {to_node}: {text[:50]}..."
+            )
             return True
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Errore invio messaggio: {e}")
             return False
 
+    async def send_dm(self, text: str, to_node: str) -> bool:
+        """Invia messaggio diretto a un nodo specifico"""
+        return await self.send_message(text, to_node=to_node, channel="Asti")
+
     def get_nodes(self) -> List[MeshNode]:
         """Restituisce lista nodi conosciuti"""
-        # Filtra nodi non più attivi (>30 min)
         cutoff = datetime.now() - timedelta(minutes=30)
         active = [
             n for n in _known_nodes.values()
@@ -265,14 +406,56 @@ class MeshtasticMQTTHandler:
         ]
         return sorted(active, key=lambda x: x.distance_km or 999)
 
-    def get_unread_messages(self) -> List[MeshMessage]:
-        """Restituisce messaggi non letti"""
-        return [m for m in _message_queue if not m.is_read]
+    def get_unread_messages(self, include_public: bool = False) -> List[MeshMessage]:
+        """
+        Restituisce messaggi non letti.
 
-    def mark_messages_read(self):
-        """Segna tutti i messaggi come letti"""
-        for m in _message_queue:
-            m.is_read = True
+        Priorità: DM > Asti > MediumFast (se richiesto)
+        """
+        messages = []
+
+        # 1. DM e menzioni (sempre prioritari)
+        messages.extend([m for m in _dm_queue if not m.is_read])
+
+        # 2. Canale Asti
+        messages.extend([m for m in _asti_queue if not m.is_read])
+
+        # 3. Canale pubblico (solo se richiesto o se stiamo monitorando)
+        if include_public or _monitoring_public:
+            messages.extend([m for m in _public_queue if not m.is_read])
+
+        # Ordina per timestamp
+        return sorted(messages, key=lambda x: x.timestamp)
+
+    def get_dm_count(self) -> int:
+        """Conta DM non letti"""
+        return len([m for m in _dm_queue if not m.is_read])
+
+    def mark_messages_read(self, queue_type: str = "all"):
+        """
+        Segna messaggi come letti.
+
+        Args:
+            queue_type: "dm", "asti", "public", o "all"
+        """
+        if queue_type in ["dm", "all"]:
+            for m in _dm_queue:
+                m.is_read = True
+        if queue_type in ["asti", "all"]:
+            for m in _asti_queue:
+                m.is_read = True
+        if queue_type in ["public", "all"]:
+            for m in _public_queue:
+                m.is_read = True
+
+    def clear_old_messages(self, max_age_hours: int = 24):
+        """Rimuove messaggi vecchi per non riempire la memoria"""
+        global _dm_queue, _asti_queue, _public_queue
+
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+        _dm_queue = [m for m in _dm_queue if m.timestamp > cutoff]
+        _asti_queue = [m for m in _asti_queue if m.timestamp > cutoff]
+        _public_queue = [m for m in _public_queue if m.timestamp > cutoff]
 
 
 # ============ SERIAL HANDLER (LIBRERIA PYTHON UFFICIALE) ============
@@ -325,30 +508,52 @@ class MeshtasticSerialHandler:
 
     def _on_receive(self, packet, interface):
         """Callback quando arriva un messaggio"""
-        global _message_queue
+        global _dm_queue, _asti_queue, _public_queue
 
         try:
             if packet.get("decoded", {}).get("portnum") == "TEXT_MESSAGE_APP":
                 text = packet["decoded"]["payload"].decode("utf-8")
                 from_id = packet.get("fromId", "unknown")
                 from_name = packet.get("from", from_id)
+                to_id = packet.get("toId", "broadcast")
+                channel_idx = packet.get("channel", 0)
 
                 # Cerca nome lungo se disponibile
                 if self.interface and hasattr(self.interface, 'nodes'):
                     node_info = self.interface.nodes.get(from_id, {})
                     from_name = node_info.get("user", {}).get("longName", from_name)
 
+                # Determina se è un DM
+                is_direct = (to_id == MY_NODE_ID or to_id == MY_NODE_ID.replace("!", ""))
+                is_mention = (MY_NODE_ID in text or MY_NODE_ID.replace("!", "") in text)
+
+                # Determina canale da index (0=primary, 1=secondary, etc)
+                # TODO: mappare channel_idx a nome canale
+                channel_name = "Primary" if channel_idx == 0 else f"Channel{channel_idx}"
+
                 msg = MeshMessage(
                     from_node=from_id,
                     from_name=from_name,
-                    to_node=packet.get("toId", "broadcast"),
+                    to_node=to_id,
                     text=text,
                     timestamp=datetime.now(),
-                    channel=packet.get("channel", 0),
-                    is_read=False
+                    channel_name=channel_name,
+                    channel_index=channel_idx,
+                    is_read=False,
+                    is_direct=is_direct,
+                    is_mention=is_mention
                 )
-                _message_queue.append(msg)
-                logger.bind(tag=TAG).info(f"Messaggio mesh ricevuto da {from_name}: {text[:50]}...")
+
+                # Routing come per MQTT
+                if is_direct or is_mention:
+                    _dm_queue.append(msg)
+                    logger.bind(tag=TAG).info(f"📨 DM da {from_name}: {text[:50]}...")
+                elif channel_name in MONITORED_CHANNELS:
+                    _asti_queue.append(msg)
+                    logger.bind(tag=TAG).info(f"📻 [{channel_name}] {from_name}: {text[:50]}...")
+                else:
+                    _public_queue.append(msg)
+                    logger.bind(tag=TAG).debug(f"📡 [{channel_name}] {from_name}: {text[:30]}...")
 
         except Exception as e:
             logger.bind(tag=TAG).warning(f"Errore parsing messaggio seriale: {e}")
@@ -410,14 +615,26 @@ class MeshtasticSerialHandler:
             logger.bind(tag=TAG).error(f"Errore get_nodes seriale: {e}")
             return []
 
-    def get_unread_messages(self) -> List[MeshMessage]:
-        """Restituisce messaggi non letti"""
-        return [m for m in _message_queue if not m.is_read]
+    def get_unread_messages(self, include_public: bool = False) -> List[MeshMessage]:
+        """Restituisce messaggi non letti con priorità"""
+        messages = []
+        messages.extend([m for m in _dm_queue if not m.is_read])
+        messages.extend([m for m in _asti_queue if not m.is_read])
+        if include_public:
+            messages.extend([m for m in _public_queue if not m.is_read])
+        return sorted(messages, key=lambda x: x.timestamp)
 
-    def mark_messages_read(self):
-        """Segna tutti i messaggi come letti"""
-        for m in _message_queue:
-            m.is_read = True
+    def mark_messages_read(self, queue_type: str = "all"):
+        """Segna messaggi come letti"""
+        if queue_type in ["dm", "all"]:
+            for m in _dm_queue:
+                m.is_read = True
+        if queue_type in ["asti", "all"]:
+            for m in _asti_queue:
+                m.is_read = True
+        if queue_type in ["public", "all"]:
+            for m in _public_queue:
+                m.is_read = True
 
     def close(self):
         """Chiudi connessione"""
@@ -547,6 +764,10 @@ INVIA_MESH_DESC = {
                 "destinatario": {
                     "type": "string",
                     "description": "Nome o ID del destinatario (opzionale, default: tutti)"
+                },
+                "canale": {
+                    "type": "string",
+                    "description": "Canale: 'asti' (privato locale) o 'pubblico' (MediumFast). Default: asti"
                 }
             },
             "required": ["messaggio"]
@@ -555,7 +776,7 @@ INVIA_MESH_DESC = {
 }
 
 @register_function('invia_messaggio_mesh', INVIA_MESH_DESC, ToolType.WAIT)
-async def invia_messaggio_mesh(conn, messaggio: str, destinatario: str = None):
+async def invia_messaggio_mesh(conn, messaggio: str, destinatario: str = None, canale: str = None):
     """Invia messaggio alla rete mesh LoRa"""
 
     if not messaggio:
@@ -577,14 +798,22 @@ async def invia_messaggio_mesh(conn, messaggio: str, destinatario: str = None):
                     to_node = node.node_id
                     break
 
-        success = await handler.send_message(messaggio, to_node)
+        # Determina canale (default: Asti/privato)
+        channel = None
+        if canale:
+            if "pubblic" in canale.lower() or "medium" in canale.lower():
+                channel = "public"
+            # Altrimenti usa default (Asti)
+
+        success = await handler.send_message(messaggio, to_node, channel=channel)
 
         if success:
             dest_text = f"a {destinatario}" if destinatario else "a tutti"
+            channel_text = "sul canale pubblico" if channel == "public" else "sul canale Asti"
             return ActionResponse(
                 action=Action.RESPONSE,
-                result=f"✅ Messaggio inviato {dest_text}: {messaggio}",
-                response=f"Ok! Ho trasmesso il messaggio {dest_text} sulla rete mesh."
+                result=f"✅ Messaggio inviato {dest_text} {channel_text}: {messaggio}",
+                response=f"Ok! Ho trasmesso il messaggio {dest_text} {channel_text}."
             )
         else:
             return ActionResponse(
@@ -626,13 +855,15 @@ LEGGI_MESH_DESC = {
 
 @register_function('leggi_messaggi_mesh', LEGGI_MESH_DESC, ToolType.WAIT)
 async def leggi_messaggi_mesh(conn, solo_nuovi: bool = True):
-    """Legge messaggi dalla rete mesh"""
+    """Legge messaggi dalla rete mesh con priorità: DM > Asti > Pubblici"""
 
     try:
         handler = await get_handler()
 
         if hasattr(handler, 'get_unread_messages'):
-            messages = handler.get_unread_messages() if solo_nuovi else _message_queue
+            messages = handler.get_unread_messages(include_public=True) if solo_nuovi else (
+                _dm_queue + _asti_queue + _public_queue
+            )
         else:
             messages = await handler.get_messages()
             if solo_nuovi:
@@ -645,18 +876,34 @@ async def leggi_messaggi_mesh(conn, solo_nuovi: bool = True):
                 response="Non ci sono nuovi messaggi sulla rete mesh."
             )
 
-        # Formatta messaggi
-        result = f"📬 **{len(messages)} messaggi mesh:**\n\n"
+        # Formatta messaggi con indicazione tipo/canale
+        dm_count = len([m for m in messages if m.is_direct or m.is_mention])
+        result = f"📬 **{len(messages)} messaggi mesh"
+        if dm_count > 0:
+            result += f" ({dm_count} diretti)**\n\n"
+        else:
+            result += ":**\n\n"
+
         spoken_parts = []
 
         for msg in messages[-5:]:  # Ultimi 5
             time_str = msg.timestamp.strftime("%H:%M")
-            result += f"• [{time_str}] **{msg.from_name}**: {msg.text}\n"
+            # Indicatore tipo messaggio
+            if msg.is_direct:
+                icon = "📨"  # DM
+            elif msg.is_mention:
+                icon = "📣"  # Menzione
+            elif msg.channel_name in MONITORED_CHANNELS:
+                icon = "📻"  # Canale monitorato
+            else:
+                icon = "📡"  # Pubblico
+
+            result += f"{icon} [{time_str}] **{msg.from_name}** ({msg.channel_name}): {msg.text}\n"
             spoken_parts.append(f"{msg.from_name} dice: {msg.text}")
 
         # Segna come letti
         if hasattr(handler, 'mark_messages_read'):
-            handler.mark_messages_read()
+            handler.mark_messages_read("all")
 
         spoken = "Hai " + str(len(messages)) + " messaggi. " + ". ".join(spoken_parts[:3])
 
