@@ -351,6 +351,30 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             device = device_match.group(0) if device_match else ""
             return f'{{"function_call": {{"name": "domotica", "arguments": {{"action": "{action}", "device": "{device}"}}}}}}'
 
+        # ============ MESHTASTIC / LORA MESH ============
+        # Invia messaggio alla rete mesh LoRa
+        if match_any(['messaggio mesh', 'manda lora', 'trasmetti mesh', 'invia mesh',
+                      'scrivi mesh', 'dì sulla mesh', 'messaggio radio', 'manda messaggio lora',
+                      'walkie talkie', 'trasmetti lora', 'scrivi sulla rete']):
+            # Estrai messaggio dal testo
+            msg_match = re.search(r'(?:mesh|lora|radio|rete)\s*[:\s]+(.+?)$', text_lower)
+            if not msg_match:
+                msg_match = re.search(r'(?:manda|invia|trasmetti|scrivi|dì)\s+(?:messaggio\s+)?(?:mesh|lora|radio)?\s*[:\s]*(.+?)$', text_lower)
+            messaggio = msg_match.group(1).strip() if msg_match else ""
+            return f'{{"function_call": {{"name": "invia_messaggio_mesh", "arguments": {{"messaggio": "{messaggio}"}}}}}}'
+
+        # Leggi messaggi mesh
+        if match_any(['leggi mesh', 'messaggi mesh', 'messaggi lora', 'cosa hanno scritto',
+                      'nuovi messaggi radio', 'chi ha scritto mesh', 'messaggi radio',
+                      'leggi lora', 'ci sono messaggi']):
+            return '{"function_call": {"name": "leggi_messaggi_mesh"}}'
+
+        # Nodi mesh vicini
+        if match_any(['nodi vicini', 'nodi mesh', "chi c'è sulla mesh", 'dispositivi lora',
+                      'quanti nodi', 'distanza nodi', 'stato mesh', 'rete mesh',
+                      'chi è connesso', 'nodi lora', 'chi vedi sulla rete']):
+            return '{"function_call": {"name": "nodi_mesh_vicini"}}'
+
         # ============ MEDITAZIONE ============
         if match_any(['meditazione', 'rilassamento', 'respirazione', 'mindfulness', 'rilassati']):
             return '{"function_call": {"name": "meditazione"}}'
