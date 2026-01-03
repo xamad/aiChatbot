@@ -3,7 +3,7 @@
 > Documento di architettura per l'integrazione di sensori ESP32, LoRa/Meshtastic e hub locale con il chatbot vocale Xiaozhi.
 
 **Data**: Gennaio 2025
-**Versione**: 2.2 (Firmware, OS, integrazione Xiaozhi, alert push)
+**Versione**: 2.3 (Ottimizzazioni avanzate, correzioni, checklist deploy)
 
 ---
 
@@ -2446,6 +2446,1114 @@ mesh_alerts:
 
 ---
 
+## Ottimizzazioni Avanzate
+
+### Dual-Path Alert (Riduzione Latenza)
+
+**Problema**: Il percorso alert attraversa 4+ hop con latenza 2-5 secondi. Per emergenze gas/fumo, troppo lento.
+
+**Soluzione**: Pre-azioni locali IMMEDIATE + notifica VPS asincrona:
+
+```
+ALERT CRITICO - DUAL PATH:
+├─► Path 1 (VELOCE < 50ms): Sensore → Gateway → LuckFox → Azione locale
+│   └─► Attiva ventola, sirena GPIO, Piper TTS locale
+│
+└─► Path 2 (COMPLETO 2-3s): Sensore → VPS → Broadcast chatbot
+    └─► Notifica vocale dettagliata a tutti i dispositivi
+```
+
+```python
+# luckfox_automations.py - PRE-AZIONI IMMEDIATE
+import RPi.GPIO as GPIO
+import subprocess
+
+VENTOLA_PIN = 17
+SIRENA_PIN = 27
+
+def on_critical_sensor(topic, value):
+    """Azioni IMMEDIATE < 50ms - NON aspetta VPS"""
+
+    if "gas" in topic and value > 800:
+        # 1. GPIO diretta (< 1ms)
+        GPIO.output(VENTOLA_PIN, GPIO.HIGH)
+        GPIO.output(SIRENA_PIN, GPIO.HIGH)
+
+        # 2. MQTT locale per altri attuatori (< 10ms)
+        mqtt_local.publish("comandi/cucina/ventola", '{"action":"on"}')
+
+        # 3. Piper TTS locale SINCRONO (< 500ms)
+        subprocess.run([
+            "piper", "--model", "it_IT-riccardo-medium",
+            "--output-raw", "|", "aplay", "-r", "22050", "-f", "S16_LE"
+        ], input="Attenzione! Gas rilevato in cucina!", text=True)
+
+        # 4. POI invia al VPS (asincrono, non blocca)
+        asyncio.create_task(mqtt_vps.publish(topic, {"value": value, "local_action": "ventola_on"}))
+```
+
+### Light Sleep per Nodi Indoor
+
+**Problema**: Nodi indoor sempre attivi consumano 80-100mA = batteria 18650 dura solo 30-40 ore.
+
+**Soluzione**: Light Sleep con wake-up su ESP-NOW (invece di Deep Sleep):
+
+```yaml
+# ESPHome - Light sleep per nodi che devono ricevere comandi
+# Consumo: ~5-10mA (batteria dura 10-15 giorni vs 30 ore)
+
+esphome:
+  name: sensore_soggiorno
+  on_boot:
+    then:
+      - light_sleep.enter:  # Entra in light sleep dopo boot
+
+# Light sleep con wake-up automatico su pacchetto ESP-NOW
+light_sleep:
+  esp_now_wakeup: true      # Wake su ricezione ESP-NOW
+  wakeup_pin:
+    number: GPIO0           # Wake anche su bottone fisico
+    mode: INPUT_PULLUP
+
+# Il nodo si sveglia automaticamente quando:
+# 1. Riceve pacchetto ESP-NOW (comando)
+# 2. Timer periodico (ogni 30s per lettura sensore)
+# 3. Pressione bottone GPIO0
+```
+
+> **Nota**: Per attuatori (luci, prese) usa alimentazione permanente USB/PoE, non batterie.
+
+### Protezione SD Card LuckFox
+
+**Problema**: Mosquitto con log persistenti degrada SD card in pochi mesi (cicli scrittura limitati).
+
+**Soluzione**: RAM disk + sync periodico:
+
+```bash
+# /etc/fstab - Mount Mosquitto data in RAM
+tmpfs /var/lib/mosquitto tmpfs defaults,size=64M,noatime 0 0
+
+# /etc/mosquitto/mosquitto.conf
+persistence true
+persistence_location /var/lib/mosquitto/
+log_dest none  # Disabilita log su disco
+
+# Cron - backup su SD ogni 6 ore (riduce scritture 99%)
+echo "0 */6 * * * rsync -a /var/lib/mosquitto/ /mnt/sd/mosquitto_backup/" >> /etc/crontab
+```
+
+**Alternative SD-friendly**:
+- **eMMC**: LuckFox con eMMC integrato (100x più resistente)
+- **NanoMQ**: Broker ultra-leggero, meno I/O di Mosquitto
+- **Log rotation**: `logrotate` con max 1MB per file
+
+### Rate Limiting Alert (Anti-Spam)
+
+**Problema**: Sensore che oscilla sulla soglia (795→805→795) genera spam vocale.
+
+**Soluzione**: Hysteresis + Cooldown:
+
+```python
+# mesh_alerts.py - Alert con isteresi anti-spam
+import time
+
+class AlertManager:
+    def __init__(self):
+        self.last_alert_time = {}   # {sensor_id: timestamp}
+        self.alert_states = {}       # {sensor_id: current_level}
+        self.cooldown_seconds = 60   # Min 60s tra alert stesso sensore
+
+    def process_with_hysteresis(self, sensor_id: str, value: float, thresholds: dict):
+        """
+        Isteresi: soglia attivazione != soglia disattivazione
+        Evita flip-flop quando valore oscilla sulla soglia
+        """
+        current_state = self.alert_states.get(sensor_id)
+
+        # Soglie con isteresi (±10%)
+        activate_critical = thresholds["critical"]        # 800
+        deactivate_critical = activate_critical * 0.90    # 720 (10% sotto)
+
+        activate_emergency = thresholds["emergency"]      # 1000
+        deactivate_emergency = activate_emergency * 0.90  # 900
+
+        new_level = None
+
+        # Logica attivazione (solo se supera soglia)
+        if value >= activate_emergency and current_state != "emergency":
+            new_level = "emergency"
+        elif value >= activate_critical and current_state not in ["critical", "emergency"]:
+            new_level = "critical"
+
+        # Logica disattivazione (solo se scende sotto soglia - isteresi)
+        if current_state == "emergency" and value < deactivate_emergency:
+            self.alert_states[sensor_id] = "critical" if value >= activate_critical else None
+            return None  # Non notifica disattivazione
+
+        if current_state == "critical" and value < deactivate_critical:
+            self.alert_states[sensor_id] = None
+            return None
+
+        # Nuovo alert: verifica cooldown
+        if new_level:
+            last_time = self.last_alert_time.get(sensor_id, 0)
+            if time.time() - last_time < self.cooldown_seconds:
+                return None  # Skip: troppo presto
+
+            self.alert_states[sensor_id] = new_level
+            self.last_alert_time[sensor_id] = time.time()
+            return self.create_alert(sensor_id, value, new_level)
+
+        return None
+```
+
+### OTA Firmware Manager per Mesh
+
+Per una mesh di 20+ nodi, aggiornamento manuale firmware è insostenibile.
+
+```python
+# luckfox_ota_manager.py - Gestione OTA centralizzata
+import requests
+import json
+import hashlib
+
+class MeshOTAManager:
+    def __init__(self, firmware_server: str = "http://vps.example.com/firmware/"):
+        self.server = firmware_server
+        self.devices = {}  # Popolato da heartbeat MQTT
+
+    def check_updates_available(self) -> list:
+        """Controlla dispositivi con firmware obsoleto"""
+        try:
+            latest = requests.get(f"{self.server}versions.json").json()
+        except:
+            return []
+
+        outdated = []
+        for mac, info in self.devices.items():
+            device_type = info.get("type", "unknown")
+            current_ver = info.get("version", "0.0.0")
+            latest_ver = latest.get(device_type, current_ver)
+
+            if self._version_compare(current_ver, latest_ver) < 0:
+                outdated.append({
+                    "mac": mac,
+                    "name": info.get("name", mac),
+                    "type": device_type,
+                    "current": current_ver,
+                    "latest": latest_ver,
+                    "url": f"{self.server}{device_type}/v{latest_ver}.bin"
+                })
+
+        return outdated
+
+    def trigger_ota(self, mac: str, firmware_url: str):
+        """Invia comando OTA via MQTT"""
+        # Calcola MD5 per verifica integrità
+        firmware = requests.get(firmware_url).content
+        md5 = hashlib.md5(firmware).hexdigest()
+
+        payload = {
+            "action": "ota_update",
+            "url": firmware_url,
+            "md5": md5,
+            "size": len(firmware)
+        }
+
+        mqtt_client.publish(f"mesh/comandi/{mac}/ota", json.dumps(payload))
+        logger.info(f"OTA triggered for {mac}: {firmware_url}")
+
+    def batch_update(self, device_type: str, max_concurrent: int = 3):
+        """Aggiorna batch (max 3 contemporanei per non sovraccaricare)"""
+        outdated = [d for d in self.check_updates_available()
+                   if d["type"] == device_type]
+
+        for i in range(0, len(outdated), max_concurrent):
+            batch = outdated[i:i + max_concurrent]
+
+            for device in batch:
+                self.trigger_ota(device["mac"], device["url"])
+
+            # Attendi completamento batch (timeout 5 min)
+            self._wait_for_batch(batch, timeout=300)
+
+    def _version_compare(self, v1: str, v2: str) -> int:
+        """Confronta versioni semver"""
+        parts1 = [int(x) for x in v1.split('.')]
+        parts2 = [int(x) for x in v2.split('.')]
+
+        for p1, p2 in zip(parts1, parts2):
+            if p1 < p2: return -1
+            if p1 > p2: return 1
+        return 0
+```
+
+### Correzione Sintassi ESPHome ESP-NOW
+
+La sintassi nel documento precedente aveva errori. Versione corretta per ESPHome 2025.8+:
+
+```yaml
+# cucina.yaml - SINTASSI CORRETTA ESP-NOW
+esphome:
+  name: cucina
+  friendly_name: "Sensore Cucina"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# WiFi disabilitato per ESP-NOW puro (risparmia energia)
+wifi:
+  enable_on_boot: false
+
+# ESP-NOW Component (verifica changelog ESPHome 2025.8+)
+esp_now:
+  # Chiave crittografia 16 bytes (hex)
+  encryption_key: "0123456789ABCDEF0123456789ABCDEF"
+
+  # Canale WiFi (deve matchare gateway)
+  channel: 1
+
+  # Peer gateway
+  peers:
+    - mac_address: "AA:BB:CC:DD:EE:FF"
+      encrypt: true
+
+sensor:
+  - platform: dht
+    model: DHT22
+    pin: GPIO4
+    temperature:
+      name: "Temperatura Cucina"
+      id: temp_cucina
+      on_value:
+        then:
+          - esp_now.send:
+              peer: 0  # Indice peer (gateway)
+              data: !lambda |-
+                // Formato JSON compatto
+                char buf[64];
+                snprintf(buf, sizeof(buf),
+                  "{\"t\":%.1f,\"h\":%.1f}",
+                  id(temp_cucina).state,
+                  id(hum_cucina).state);
+                return std::vector<uint8_t>(buf, buf + strlen(buf));
+    humidity:
+      name: "Umidità Cucina"
+      id: hum_cucina
+    update_interval: 30s
+```
+
+> **Nota**: La documentazione ESPHome ESP-NOW è in beta. Verifica sempre il [changelog ufficiale](https://esphome.io/changelog/).
+
+### Correzione Meshtastic MQTT
+
+**Errore nel documento**: Porta 8883 per TLS. Meshtastic usa porta **1883** anche con TLS.
+
+```yaml
+# Meshtastic config - CORREZIONE porta
+mqtt:
+  enabled: true
+  address: mqtt://vps.example.com:1883   # Porta 1883, NON 8883!
+  username: meshtastic
+  password: "****"
+  tls_enabled: true          # TLS su porta 1883 (non standard)
+  encryption_enabled: true
+  json_enabled: true
+```
+
+### Ottimizzazione Query SQL LuckFox
+
+Le query aggregate sono lente su ARM. Ottimizzazioni:
+
+```python
+# luckfox_queue_manager.py - Query ottimizzate
+
+def init_db_optimized(self):
+    """Setup DB con indici per performance"""
+    self.db.executescript('''
+        -- Indice composto per query frequenti
+        CREATE INDEX IF NOT EXISTS idx_topic_ts
+        ON sensor_buffer(topic, timestamp DESC);
+
+        -- Indice per cleanup
+        CREATE INDEX IF NOT EXISTS idx_timestamp
+        ON sensor_buffer(timestamp);
+
+        -- Abilita WAL mode (più veloce su SD)
+        PRAGMA journal_mode=WAL;
+
+        -- Cache in memoria
+        PRAGMA cache_size=2000;
+    ''')
+
+def sync_to_vps_optimized(self, mqtt_client):
+    """Query ottimizzata per LuckFox ARM"""
+    # Limita a ultima ora (non tutto lo storico)
+    cursor = self.db.execute('''
+        SELECT topic,
+               ROUND(AVG(value), 2) as avg_val,
+               ROUND(MIN(value), 2) as min_val,
+               ROUND(MAX(value), 2) as max_val,
+               COUNT(*) as samples
+        FROM sensor_buffer
+        WHERE timestamp > datetime('now', '-1 hour')
+        GROUP BY topic
+        LIMIT 100
+    ''')
+    # ... rest of sync logic
+
+def vacuum_db(self):
+    """Deframmenta DB - chiamare 1x/giorno via cron"""
+    self.db.execute("VACUUM")
+    self.db.execute("ANALYZE")
+```
+
+### Architettura Ibrida con Zigbee
+
+Per dispositivi commerciali (Ikea, Philips Hue), considera Zigbee invece di DIY:
+
+```
+Architettura Ibrida Consigliata:
+├── DIY Sensori: ESP-NOW/LoRa
+│   └── Temperatura, gas, movimento, outdoor
+│
+├── Luci/Attuatori: Zigbee (commerciali)
+│   └── Affidabile, basso consumo, mesh nativo
+│   └── Ikea Trådfri, Philips Hue, Sonoff ZBMINI
+│
+└── Gateway: LuckFox + Zigbee USB Dongle
+    └── CC2652P, Sonoff ZBDongle-E, ConBee II
+    └── Software: Zigbee2MQTT (compatibile Mosquitto)
+```
+
+```bash
+# Setup Zigbee2MQTT su LuckFox
+docker run -d \
+  --name zigbee2mqtt \
+  --device=/dev/ttyUSB0 \
+  -v /opt/zigbee2mqtt/data:/app/data \
+  -e TZ=Europe/Rome \
+  koenkk/zigbee2mqtt
+```
+
+---
+
+## Checklist Pre-Deploy
+
+### Performance & Stress Test
+
+```
+□ Test 50+ messaggi MQTT/sec su LuckFox (simula 30 sensori attivi)
+□ Misura latenza end-to-end: sensore → chatbot vocale (target < 3s)
+□ Test failover: stacca ethernet 10 volte, verifica sync buffer
+□ Monitor memoria LuckFox 24h: verifica no memory leak
+□ Test batteria nodi: misura consumo reale vs teorico
+```
+
+### Security Hardening
+
+```
+□ Cambia password default LuckFox (root:luckfox → custom)
+□ SSH key-only: disabilita password login
+□ Firewall LuckFox: solo porte MQTT (1883) e dashboard (5000)
+□ Mosquitto ACL: ogni device accede solo ai suoi topic
+□ ESP-NOW encryption key: univoca, non default
+□ Meshtastic PSK: generato random, non default
+□ VPS firewall: MQTT solo da IP LuckFox
+```
+
+### Reliability
+
+```
+□ UPS/Power bank per LuckFox (min 3-4 ore autonomia)
+□ Watchdog hardware: auto-reboot se freeze (systemd watchdog)
+□ SD card backup automatico su VPS (rsync giornaliero)
+□ Test range LoRa con RF analyzer (Meshtastic mostra RSSI)
+□ Spare hardware: 1x ESP32 gateway, 1x LuckFox di backup
+```
+
+---
+
+## Struttura Repository Consigliata
+
+```
+iot-mesh-xiaozhi/
+├── docs/
+│   ├── ARCHITETTURA_MESH_IOT.md    # Questo documento
+│   ├── CHANGELOG.md
+│   ├── TROUBLESHOOTING.md
+│   └── WIRING_DIAGRAMS/
+│       ├── esp32_dht22.png
+│       └── luckfox_gpio.png
+│
+├── firmware/
+│   ├── espnow-sensor/              # Nodi indoor ESPHome
+│   │   ├── cucina.yaml
+│   │   ├── soggiorno.yaml
+│   │   └── secrets.yaml.example
+│   ├── lora-outdoor/               # Nodi outdoor Arduino
+│   │   ├── src/main.cpp
+│   │   ├── platformio.ini
+│   │   └── README.md
+│   ├── gateway-zh/                 # Gateway zh_gateway config
+│   │   └── sdkconfig
+│   └── versions.json               # Versioni firmware per OTA
+│
+├── server/
+│   ├── xiaozhi-plugins/            # Plugin domotica
+│   │   ├── mesh_iot_monitor.py
+│   │   ├── mesh_alerts.py
+│   │   └── automazioni_vocali.py
+│   ├── luckfox-scripts/            # Script hub locale
+│   │   ├── automations.py
+│   │   ├── watchdog.py
+│   │   ├── ota_manager.py
+│   │   └── dashboard.py
+│   └── docker-compose.yml
+│
+├── config/
+│   ├── mosquitto/
+│   │   ├── mosquitto.conf
+│   │   ├── acl.conf
+│   │   └── passwd.example
+│   ├── meshtastic/
+│   │   └── config.yaml
+│   └── luckfox/
+│       ├── fstab
+│       └── crontab
+│
+├── tests/
+│   ├── mqtt_stress_test.py
+│   ├── failover_simulation.sh
+│   ├── latency_measure.py
+│   └── battery_drain_test.md
+│
+├── .github/
+│   └── workflows/
+│       └── firmware_build.yml      # CI/CD per firmware
+│
+├── README.md
+├── LICENSE
+└── .gitignore
+```
+
+---
+
+## Prompt Claude Code per Implementazione
+
+Usa questo prompt per far generare il codice a Claude Code:
+
+```markdown
+# Prompt: Implementazione IoT Mesh Xiaozhi
+
+Sei un esperto di IoT, ESP32 e Python. Devi implementare il sistema
+descritto in ARCHITETTURA_MESH_IOT.md v2.3.
+
+## Contesto
+- Hub locale: LuckFox Pico Ultra con Buildroot Linux
+- Gateway: ESP32-S3 con zh_gateway firmware
+- Sensori: ESP32-WROOM con ESPHome 2025.8+
+- Server: VPS con Xiaozhi chatbot Python
+- Protocolli: ESP-NOW (indoor), LoRa/Meshtastic (outdoor), MQTT
+
+## Task da completare in ordine:
+
+1. **Setup LuckFox** (luckfox-scripts/)
+   - Script automations.py con dual-path alert
+   - Watchdog con heartbeat monitoring
+   - Dashboard Flask minimale
+   - Configurazione Mosquitto con RAM disk
+
+2. **Plugin Xiaozhi** (xiaozhi-plugins/)
+   - mesh_iot_monitor.py: lettura sensori vocale
+   - mesh_alerts.py: gestione allarmi con hysteresis
+   - automazioni_vocali.py: scenari domotici
+   - alert_broadcaster.py: push WebSocket ai chatbot
+
+3. **Configurazioni ESPHome** (firmware/espnow-sensor/)
+   - Template YAML per sensore cucina (DHT22 + MQ-2)
+   - Template per sensore soggiorno (mmWave presenza)
+   - Configurazione ESP-NOW con encryption
+
+4. **Test suite** (tests/)
+   - mqtt_stress_test.py: 50 msg/sec per 10 minuti
+   - failover_simulation.sh: test disconnessione VPS
+   - latency_measure.py: misura tempo sensore→chatbot
+
+## Requisiti codice:
+- Python 3.10+ con type hints
+- Async/await per operazioni I/O
+- Logging strutturato con loguru
+- Error handling robusto
+- Commenti in italiano
+
+## Output atteso:
+Genera i file uno alla volta, partendo da luckfox-scripts/automations.py
+Chiedi conferma prima di procedere al file successivo.
+```
+
+---
+
+## Sezione 17: Architettura Multi-Protocollo Anti-Jamming
+
+### Analisi Vulnerabilità ESP-NOW
+
+ESP-NOW opera su 2.4 GHz (stessa banda WiFi). **Vulnerabilità critica**:
+- **Jamming facilissimo**: Un generatore di rumore 2.4 GHz da €20 disabilita TUTTA la rete
+- **Nessuna frequency hopping**: A differenza di Zigbee/Thread, ESP-NOW è fisso
+- **Correlazione con WiFi**: Se WiFi cade, ESP-NOW probabilmente cade insieme
+
+### Strategia Multi-Protocollo (Raccomandato)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   MULTI-PROTOCOL REDUNDANCY                     │
+├─────────────────────────────────────────────────────────────────┤
+│  PRIORITÀ PROTOCOLLO PER TIPO SENSORE                           │
+│                                                                  │
+│  ┌─────────────┬────────────────────────────────────────────┐   │
+│  │ CRITICO     │ Thread/Zigbee (primario) + LoRa (backup)   │   │
+│  │ (fumo,gas)  │ 802.15.4 + 868MHz = anti-jamming           │   │
+│  ├─────────────┼────────────────────────────────────────────┤   │
+│  │ IMPORTANTE  │ Zigbee (primario) + WiFi (backup)          │   │
+│  │ (porte,PIR) │ Zigbee ha frequency hopping                │   │
+│  ├─────────────┼────────────────────────────────────────────┤   │
+│  │ NORMALE     │ WiFi/ESP-NOW (primario)                    │   │
+│  │ (temp,hum)  │ Economico, affidabile per dati non-critici │   │
+│  ├─────────────┼────────────────────────────────────────────┤   │
+│  │ OUTDOOR     │ LoRa/Meshtastic (sempre)                   │   │
+│  │ (meteo,cam) │ Long range, penetrazione edifici           │   │
+│  └─────────────┴────────────────────────────────────────────┘   │
+│                                                                  │
+│  BACKUP ULTIMATE: Cellular 4G (SIM800L/A7670)                   │
+│  - Solo per alert critici quando TUTTO è down                   │
+│  - SMS/HTTP fallback per fumo/gas/intrusione                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Mapping Dispositivi per Protocollo
+
+| Dispositivo | Protocollo Primario | Backup | Criticità | Motivazione |
+|-------------|---------------------|--------|-----------|-------------|
+| **Rilevatore Fumo** | Zigbee/Thread | LoRa | 🔴 CRITICO | Anti-jamming, batteria 2+ anni |
+| **Sensore Gas** | Zigbee/Thread | LoRa | 🔴 CRITICO | Mai deve mancare |
+| **Sensore Apertura** | Zigbee | WiFi | 🟠 ALTO | Frequency hopping nativo |
+| **PIR Presenza** | Zigbee | ESP-NOW | 🟠 ALTO | Risposta <100ms |
+| **Temperatura/Umidità** | ESP-NOW/WiFi | - | 🟢 NORMALE | Dato non critico |
+| **Weather Station** | WiFi | LoRa | 🟢 NORMALE | Dati bulk, latenza tollerabile |
+| **ESP32-CAM** | WiFi | - | 🟡 MEDIO | Solo WiFi per video streaming |
+| **Sirena/Allarme** | Zigbee | LoRa | 🔴 CRITICO | Deve sempre rispondere |
+| **Termostato** | WiFi | Zigbee | 🟡 MEDIO | Automazioni, non safety |
+
+### Architettura Anti-Jamming
+
+```
+                           JAMMING DETECTION
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+              2.4 GHz DOWN?              868 MHz DOWN?
+              (WiFi+ESP-NOW)             (LoRa)
+                    │                           │
+                    ▼                           ▼
+         ┌─────────────────┐          ┌─────────────────┐
+         │ Zigbee Primary  │          │ Switch to 4G    │
+         │ (802.15.4)      │          │ Emergency Mode  │
+         │ 16 channels     │          │                 │
+         │ freq hopping    │          │ SMS: "JAMMING   │
+         └────────┬────────┘          │ DETECTED"       │
+                  │                   └─────────────────┘
+                  ▼
+         Still jammed?
+                  │
+                  ▼
+         ┌─────────────────┐
+         │ LoRa Backup     │
+         │ 868 MHz         │
+         │ Different band  │
+         └─────────────────┘
+```
+
+### Implementazione Multi-Protocol Router
+
+```python
+# multi_protocol_router.py
+# Router intelligente per selezione protocollo
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+class Protocol(Enum):
+    ZIGBEE = "zigbee"      # 802.15.4, 2.4GHz con frequency hopping
+    THREAD = "thread"      # 802.15.4, mesh IPv6
+    ESPNOW = "espnow"      # 2.4GHz, no hopping
+    WIFI = "wifi"          # 2.4GHz standard
+    LORA = "lora"          # 868MHz sub-GHz
+    CELLULAR = "cellular"  # 4G LTE backup
+
+class Criticality(Enum):
+    CRITICAL = "critical"  # Fumo, gas, intrusione
+    HIGH = "high"          # Porte, movimento
+    MEDIUM = "medium"      # Automazioni
+    LOW = "low"            # Temperatura, umidità
+
+@dataclass
+class ProtocolStatus:
+    """Stato di ogni protocollo"""
+    available: bool = True
+    latency_ms: float = 0
+    packet_loss: float = 0
+    last_check: float = 0
+    jamming_detected: bool = False
+
+class MultiProtocolRouter:
+    """
+    Router intelligente che seleziona il protocollo migliore
+    in base a: criticità, stato rete, jamming detection
+    """
+
+    # Priorità protocollo per criticità
+    PROTOCOL_PRIORITY = {
+        Criticality.CRITICAL: [Protocol.ZIGBEE, Protocol.THREAD, Protocol.LORA, Protocol.CELLULAR],
+        Criticality.HIGH: [Protocol.ZIGBEE, Protocol.WIFI, Protocol.ESPNOW, Protocol.LORA],
+        Criticality.MEDIUM: [Protocol.WIFI, Protocol.ESPNOW, Protocol.ZIGBEE],
+        Criticality.LOW: [Protocol.ESPNOW, Protocol.WIFI],
+    }
+
+    def __init__(self):
+        self.protocol_status: dict[Protocol, ProtocolStatus] = {
+            p: ProtocolStatus() for p in Protocol
+        }
+        self._jamming_threshold = 0.3  # 30% packet loss = jamming
+
+    async def select_protocol(
+        self,
+        criticality: Criticality,
+        device_capabilities: list[Protocol]
+    ) -> Optional[Protocol]:
+        """
+        Seleziona il protocollo ottimale per un messaggio
+
+        Args:
+            criticality: Livello di criticità del messaggio
+            device_capabilities: Protocolli supportati dal device
+
+        Returns:
+            Protocol selezionato o None se nessuno disponibile
+        """
+        priority_list = self.PROTOCOL_PRIORITY[criticality]
+
+        for protocol in priority_list:
+            if protocol not in device_capabilities:
+                continue
+
+            status = self.protocol_status[protocol]
+
+            # Skip se jamming rilevato
+            if status.jamming_detected:
+                logger.warning(f"Jamming detected on {protocol.value}, skipping")
+                continue
+
+            # Skip se non disponibile
+            if not status.available:
+                continue
+
+            # Per messaggi critici, verifica anche latenza
+            if criticality == Criticality.CRITICAL and status.latency_ms > 500:
+                logger.warning(f"{protocol.value} latency too high for critical message")
+                continue
+
+            return protocol
+
+        # Fallback: cellular per critical, primo disponibile per altri
+        if criticality == Criticality.CRITICAL:
+            if Protocol.CELLULAR in device_capabilities:
+                logger.warning("All protocols failed, using cellular emergency")
+                return Protocol.CELLULAR
+
+        logger.error(f"No protocol available for {criticality.value} message")
+        return None
+
+    async def detect_jamming(self):
+        """
+        Monitora continuamente per rilevare jamming
+        Logica: packet loss improvviso > threshold su singola banda
+        """
+        while True:
+            # Check 2.4GHz band (WiFi + ESP-NOW)
+            wifi_loss = self.protocol_status[Protocol.WIFI].packet_loss
+            espnow_loss = self.protocol_status[Protocol.ESPNOW].packet_loss
+
+            if wifi_loss > self._jamming_threshold and espnow_loss > self._jamming_threshold:
+                # Entrambi i protocolli 2.4GHz degradati = probabile jamming
+                if not self.protocol_status[Protocol.WIFI].jamming_detected:
+                    logger.critical("🚨 JAMMING DETECTED on 2.4GHz band!")
+                    self.protocol_status[Protocol.WIFI].jamming_detected = True
+                    self.protocol_status[Protocol.ESPNOW].jamming_detected = True
+                    await self._trigger_jamming_alert("2.4GHz")
+            else:
+                # Resetta flag jamming se situazione migliora
+                self.protocol_status[Protocol.WIFI].jamming_detected = False
+                self.protocol_status[Protocol.ESPNOW].jamming_detected = False
+
+            # Check 868MHz (LoRa)
+            lora_loss = self.protocol_status[Protocol.LORA].packet_loss
+            if lora_loss > self._jamming_threshold:
+                if not self.protocol_status[Protocol.LORA].jamming_detected:
+                    logger.critical("🚨 JAMMING DETECTED on 868MHz band!")
+                    self.protocol_status[Protocol.LORA].jamming_detected = True
+                    await self._trigger_jamming_alert("868MHz")
+                    # Se anche LoRa è down, attiva cellular
+                    await self._activate_cellular_emergency()
+
+            await asyncio.sleep(5)  # Check ogni 5 secondi
+
+    async def _trigger_jamming_alert(self, band: str):
+        """Invia alert di jamming via canale ancora funzionante"""
+        alert_msg = {
+            "type": "SECURITY_ALERT",
+            "event": "JAMMING_DETECTED",
+            "band": band,
+            "severity": "CRITICAL",
+            "action": "Switched to backup protocol"
+        }
+        # TODO: Invia via protocollo backup
+        logger.critical(f"JAMMING ALERT: {alert_msg}")
+
+    async def _activate_cellular_emergency(self):
+        """Attiva backup cellulare per emergenze"""
+        self.protocol_status[Protocol.CELLULAR].available = True
+        logger.warning("Cellular emergency mode ACTIVATED")
+        # TODO: Invia SMS di test per verificare funzionamento
+
+
+# Configurazione device con multi-protocollo
+DEVICE_CONFIG = {
+    "smoke_detector_kitchen": {
+        "protocols": [Protocol.ZIGBEE, Protocol.LORA],
+        "criticality": Criticality.CRITICAL,
+        "primary": Protocol.ZIGBEE,
+    },
+    "gas_sensor_kitchen": {
+        "protocols": [Protocol.ZIGBEE, Protocol.LORA],
+        "criticality": Criticality.CRITICAL,
+        "primary": Protocol.ZIGBEE,
+    },
+    "door_sensor_main": {
+        "protocols": [Protocol.ZIGBEE, Protocol.WIFI],
+        "criticality": Criticality.HIGH,
+        "primary": Protocol.ZIGBEE,
+    },
+    "pir_livingroom": {
+        "protocols": [Protocol.ZIGBEE, Protocol.ESPNOW],
+        "criticality": Criticality.HIGH,
+        "primary": Protocol.ZIGBEE,
+    },
+    "temp_sensor_bedroom": {
+        "protocols": [Protocol.ESPNOW, Protocol.WIFI],
+        "criticality": Criticality.LOW,
+        "primary": Protocol.ESPNOW,
+    },
+    "weather_station_outdoor": {
+        "protocols": [Protocol.WIFI, Protocol.LORA],
+        "criticality": Criticality.LOW,
+        "primary": Protocol.WIFI,  # Dati bulk via WiFi
+    },
+    "esp32_cam_garden": {
+        "protocols": [Protocol.WIFI],  # Solo WiFi per video
+        "criticality": Criticality.MEDIUM,
+        "primary": Protocol.WIFI,
+    },
+    "siren_alarm": {
+        "protocols": [Protocol.ZIGBEE, Protocol.LORA],
+        "criticality": Criticality.CRITICAL,
+        "primary": Protocol.ZIGBEE,
+    },
+}
+```
+
+### Hardware Consigliato per Multi-Protocollo
+
+#### Hub Centrale (LuckFox Pico)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    LUCKFOX PICO ULTRA                   │
+│                                                         │
+│  USB 1 ──► Zigbee Coordinator (CC2652P/Sonoff ZBDongle)│
+│  USB 2 ──► ESP32-S3 zh_gateway (ESP-NOW → MQTT)        │
+│  USB 3 ──► LoRa Module (SX1262 868MHz)                 │
+│  GPIO  ──► SIM800L/A7670 (4G backup via UART)          │
+│                                                         │
+│  Software:                                              │
+│  - Zigbee2MQTT (per device Zigbee)                     │
+│  - Mosquitto MQTT broker                               │
+│  - Multi-Protocol Router (Python)                      │
+│  - Meshtastic-MQTT bridge                              │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Dongle Zigbee Raccomandati
+
+| Modello | Chip | Range | Note |
+|---------|------|-------|------|
+| **Sonoff ZBDongle-E** | EFR32MG21 | 100m+ | **Raccomandato**, Thread-ready |
+| **Sonoff ZBDongle-P** | CC2652P | 100m+ | Più economico |
+| **ConBee II** | CC2652R1 | 60m | Deconz compatibile |
+| **SLZB-06** | CC2652P | 150m+ | PoE, antenna esterna |
+
+#### Moduli 4G per Backup Cellulare
+
+| Modulo | Banda | Note |
+|--------|-------|------|
+| **SIM800L** | 2G | Economico, solo SMS |
+| **SIM7600** | 4G LTE | HTTP + SMS |
+| **A7670** | 4G LTE | **Raccomandato**, basso consumo |
+
+### Configurazione Zigbee2MQTT
+
+```yaml
+# /opt/zigbee2mqtt/data/configuration.yaml
+
+homeassistant: false
+permit_join: false
+
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://localhost:1883
+
+serial:
+  port: /dev/ttyUSB0
+  adapter: ezsp  # Per EFR32MG21 (Sonoff ZBDongle-E)
+  # adapter: zstack  # Per CC2652P
+
+advanced:
+  network_key: GENERATE  # Genera chiave sicura
+  pan_id: GENERATE
+  channel: 15  # Evita sovrapposizione con WiFi channel 1,6,11
+
+frontend:
+  port: 8080
+
+availability:
+  active:
+    timeout: 10
+  passive:
+    timeout: 1500
+
+devices:
+  '0x00158d0001234567':
+    friendly_name: smoke_detector_kitchen
+    retain: true
+  '0x00158d0007654321':
+    friendly_name: gas_sensor_kitchen
+    retain: true
+```
+
+### Integrazione Alert Critici con Backup Cellulare
+
+```python
+# cellular_backup.py
+# Backup SMS per alert critici quando mesh è down
+
+import serial
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+class CellularBackup:
+    """
+    Gestisce backup SMS via SIM800L/A7670
+    Usato SOLO quando tutti gli altri protocolli falliscono
+    """
+
+    def __init__(self, port: str = "/dev/ttyAMA0", baudrate: int = 115200):
+        self.port = port
+        self.baudrate = baudrate
+        self.serial: serial.Serial = None
+        self.emergency_numbers = ["+39xxxxxxxxxx"]  # Numeri per emergenze
+
+    async def connect(self):
+        """Inizializza modem GSM"""
+        try:
+            self.serial = serial.Serial(self.port, self.baudrate, timeout=5)
+            await asyncio.sleep(2)
+
+            # Test AT
+            self._send_at("AT")
+            response = self._read_response()
+            if "OK" not in response:
+                raise Exception("Modem not responding")
+
+            # Configura modalità testo SMS
+            self._send_at("AT+CMGF=1")
+
+            logger.info("Cellular backup modem initialized")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to initialize cellular backup: {e}")
+            return False
+
+    def _send_at(self, command: str):
+        """Invia comando AT"""
+        self.serial.write(f"{command}\r\n".encode())
+
+    def _read_response(self, timeout: float = 2.0) -> str:
+        """Legge risposta modem"""
+        response = ""
+        start = asyncio.get_event_loop().time()
+        while (asyncio.get_event_loop().time() - start) < timeout:
+            if self.serial.in_waiting:
+                response += self.serial.read(self.serial.in_waiting).decode()
+        return response
+
+    async def send_emergency_sms(self, message: str, alert_type: str = "CRITICAL"):
+        """
+        Invia SMS di emergenza
+        USARE SOLO per: fumo, gas, intrusione, jamming
+        """
+        if not self.serial:
+            await self.connect()
+
+        full_message = f"🚨 {alert_type}\n{message}\n[IoT Mesh Alert]"
+
+        for number in self.emergency_numbers:
+            try:
+                self._send_at(f'AT+CMGS="{number}"')
+                await asyncio.sleep(0.5)
+                self.serial.write(full_message.encode())
+                self.serial.write(bytes([26]))  # Ctrl+Z per inviare
+
+                response = self._read_response(timeout=10)
+                if "+CMGS:" in response:
+                    logger.info(f"Emergency SMS sent to {number}")
+                else:
+                    logger.error(f"Failed to send SMS to {number}")
+
+            except Exception as e:
+                logger.error(f"SMS error: {e}")
+
+    async def send_jamming_alert(self, band: str):
+        """Alert specifico per jamming"""
+        message = f"JAMMING RILEVATO su banda {band}!\nSistema in modalità emergenza.\nVerificare immediatamente."
+        await self.send_emergency_sms(message, "JAMMING DETECTED")
+
+
+# Uso nel router
+async def critical_alert_handler(alert: dict, router: 'MultiProtocolRouter'):
+    """
+    Gestisce alert critici con fallback cellulare
+    """
+    # Prova prima i protocolli radio
+    protocol = await router.select_protocol(
+        Criticality.CRITICAL,
+        [Protocol.ZIGBEE, Protocol.LORA, Protocol.CELLULAR]
+    )
+
+    if protocol == Protocol.CELLULAR:
+        # Tutti i protocolli radio falliti, usa SMS
+        cellular = CellularBackup()
+        await cellular.send_emergency_sms(
+            f"{alert['type']}: {alert['message']}",
+            alert['type']
+        )
+```
+
+### ESP-NOW come Fallback (Non Primario)
+
+Con la strategia multi-protocollo, ESP-NOW diventa un **protocollo di fallback** per device non critici, non più il primario:
+
+```yaml
+# ESPHome: ESP-NOW come fallback quando WiFi disponibile
+# esphome_espnow_fallback.yaml
+
+esphome:
+  name: temp_sensor_bedroom
+
+esp32:
+  board: esp32dev
+
+# WiFi primario per dati non critici
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Se WiFi fallisce, usa ESP-NOW
+  on_disconnect:
+    then:
+      - logger.log: "WiFi lost, switching to ESP-NOW"
+      - lambda: |-
+          // Attiva ESP-NOW mode
+          esp_now_component->enable();
+
+# ESP-NOW come backup (disabilitato di default)
+esp_now:
+  id: esp_now_component
+  enabled: false  # Attivato solo su WiFi disconnect
+
+  peers:
+    - mac_address: AA:BB:CC:DD:EE:FF
+      channel: 1
+      encryption_key: !secret espnow_key
+
+  on_receive:
+    then:
+      - logger.log: "ESP-NOW message received"
+
+sensor:
+  - platform: dht
+    pin: GPIO4
+    temperature:
+      name: "Bedroom Temperature"
+      on_value:
+        then:
+          - if:
+              condition:
+                wifi.connected:
+              then:
+                # Usa MQTT via WiFi (normale)
+                - mqtt.publish:
+                    topic: sensors/bedroom/temperature
+                    payload: !lambda 'return to_string(x);'
+              else:
+                # Usa ESP-NOW (fallback)
+                - esp_now.send:
+                    peer: gateway_mac
+                    data: !lambda |-
+                      return std::vector<uint8_t>{0x01, (uint8_t)x};
+```
+
+### Riepilogo Strategia Anti-Jamming
+
+| Scenario | Azione |
+|----------|--------|
+| **Normale** | Zigbee per critici, WiFi/ESP-NOW per resto |
+| **Jamming 2.4GHz** | Switch automatico a Zigbee (freq hopping) + LoRa |
+| **Jamming Totale** | Attiva backup cellulare 4G, invia SMS emergenza |
+| **Recovery** | Rileva miglioramento, torna a protocolli normali |
+
+### Costi Implementazione Multi-Protocollo
+
+| Componente | Costo | Note |
+|------------|-------|------|
+| Sonoff ZBDongle-E | ~€25 | Coordinator Zigbee |
+| Sensori Zigbee (Aqara) | €10-20 cad | Fumo, porta, movimento |
+| ESP32 + SX1262 | ~€15 | Per nodi LoRa custom |
+| SIM A7670 | ~€15 | Backup 4G |
+| SIM dati prepagata | €5/anno | Solo SMS emergenza |
+| **Totale base** | **~€100** | Setup anti-jamming minimo |
+
+---
+
 ## Riferimenti
 
 ### Progetti Principali
@@ -2469,6 +3577,36 @@ mesh_alerts:
 ---
 
 ## Changelog
+
+### v2.4 (Gennaio 2025)
+- **Architettura Multi-Protocollo Anti-Jamming**: Strategia completa per resilienza RF
+- **Analisi Vulnerabilità ESP-NOW**: Documentato rischio jamming 2.4GHz
+- **Mapping Dispositivi per Criticità**: Tabella protocollo primario/backup per tipo sensore
+- **Zigbee/Thread come Primario**: Per sensori critici (fumo, gas, intrusione)
+- **ESP-NOW Declassato a Fallback**: Solo per device non critici quando WiFi down
+- **WiFi Mantenuto**: Per weather station e ESP-CAM (dati bulk, video)
+- **LoRa per Outdoor**: Sempre primario per sensori esterni
+- **Backup Cellulare 4G**: SIM A7670 per SMS emergenza quando tutto fallisce
+- **Multi-Protocol Router**: Implementazione Python con jamming detection
+- **Cellular Backup Class**: Gestione SMS emergenza via modem AT
+- **Zigbee2MQTT Config**: Configurazione consigliata per LuckFox
+- **Hardware Consigliato**: Dongle Zigbee (Sonoff ZBDongle-E) e moduli 4G
+- **ESPHome Fallback Pattern**: ESP-NOW attivato solo su WiFi disconnect
+- **Costi Implementazione**: Stima ~€100 per setup anti-jamming base
+
+### v2.3 (Gennaio 2025)
+- **Dual-Path Alert**: Azioni locali immediate (<50ms) + sync asincrono VPS
+- **Light Sleep Indoor**: Wake-up su ESP-NOW per nodi che ricevono comandi
+- **Protezione SD Card**: tmpfs per log, RAM disk Mosquitto, journal_mode=WAL
+- **Rate Limiting Alert**: Hysteresis + cooldown anti-spam sensori rumorosi
+- **OTA Firmware Manager**: Aggiornamenti centralizzati batch con version tracking
+- **Correzione ESPHome**: Sintassi esp_now corretta per ESPHome 2025.8+
+- **Correzione Meshtastic MQTT**: Porta 1883 (non 8883!) per TLS non-standard
+- **Ottimizzazione SQL**: PRAGMA WAL mode e cache per ARM LuckFox
+- **Zigbee Hybrid**: Architettura mista ESP-NOW + Zigbee2MQTT per device commerciali
+- **Pre-Deploy Checklist**: Lista verifica completa prima della messa in produzione
+- **Repository Structure**: Layout cartelle suggerito per il progetto
+- **Claude Code Prompt**: Template prompt per implementazione guidata
 
 ### v2.2 (Gennaio 2025)
 - **Firmware per dispositivo**: Tabella completa firmware ufficiali/custom
@@ -2508,4 +3646,4 @@ mesh_alerts:
 
 ---
 
-*Documento v2.2 - Completo con firmware, OS, integrazione Xiaozhi e sistema alert push - Gennaio 2025*
+*Documento v2.4 - Architettura Multi-Protocollo Anti-Jamming con Zigbee/Thread primario e backup cellulare - Gennaio 2025*
