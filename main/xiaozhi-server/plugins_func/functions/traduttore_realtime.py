@@ -53,10 +53,23 @@ ALIAS_LINGUE = {
 }
 
 # Comandi per uscire dalla modalità traduzione
+# Include varianti fonetiche per quando ASR interpreta "esci" in altre lingue
 EXIT_COMMANDS = [
+    # Italiano - PAROLE CHIAVE UNIVOCHE (raccomandate!)
+    "normale", "torna normale", "modalità normale", "parla italiano",
+    "xiaozhi", "traduzione off", "interprete off",
+    # Italiano standard
     "esci", "stop", "basta", "fine", "termina", "chiudi",
     "stop traduttore", "esci dal traduttore", "disattiva traduttore",
-    "fine traduzione", "basta tradurre", "smetti di tradurre"
+    "fine traduzione", "basta tradurre", "smetti di tradurre",
+    # Varianti fonetiche ASR (quando ASR interpreta male "esci")
+    "eis", "exi", "exit", "exci", "eshi", "reixi", "e sci",
+    # Russo (ASR interpreta "esci" come...)
+    "ищи", "иши", "иски",
+    # Cinese/altre interpretazioni
+    "出去", "退出",
+    # Inglese
+    "quit", "end", "close",
 ]
 
 
@@ -395,8 +408,8 @@ def traduttore_realtime(conn, testo: str = None, lingua_destinazione: str = None
 
         return ActionResponse(
             action=Action.RESPONSE,
-            result=f"🎙️ MODALITÀ INTERPRETE ATTIVA\n\n{orig_info['flag']} Italiano ↔ {dest_info['flag']} {dest_info['nome']}\n\nParla in italiano → traduco in {lingua_destinazione}\nL'interlocutore parla {lingua_destinazione} → traduco in italiano\n\nDì 'esci' per terminare.",
-            response=f"Modalità interprete attivata! Italiano e {lingua_destinazione}. Parla pure, traduco tutto. Dì esci quando hai finito."
+            result=f"🎙️ MODALITÀ INTERPRETE ATTIVA\n\n{orig_info['flag']} Italiano ↔ {dest_info['flag']} {dest_info['nome']}\n\nParla in italiano → traduco in {lingua_destinazione}\nL'interlocutore parla {lingua_destinazione} → traduco in italiano\n\nDì 'normale' o 'stop' per terminare.",
+            response=f"Modalità interprete attivata! Italiano e {lingua_destinazione}. Parla pure, traduco tutto. Dì normale o stop quando hai finito."
         )
 
     # TRADUZIONE SINGOLA

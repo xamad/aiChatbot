@@ -140,7 +140,7 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # NOTA: "modalità interprete" va a TRADUTTORE, "attiva modalità [profilo]" va qui
         # Escludiamo esplicitamente "interprete" dal match "attiva modalità" per evitare conflitti
         is_profile_request = match_any(['cambia profilo', 'attiva profilo', 'modalità assistente',
-                      'che profilo', 'quale profilo', 'quali profili', 'profili disponibili', 'lista profili'])
+                      'che profilo', 'quale profilo', 'quali profili', 'profili disponibili', 'lista profili', 'elenca profili'])
         # "attiva modalità X" solo se X non è "interprete" (quello va a traduttore)
         if 'attiva modalità' in text_lower and 'interprete' not in text_lower:
             is_profile_request = True
@@ -157,7 +157,7 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
 
             if match_any(['che profilo', 'quale profilo', 'profilo attivo', 'sono in che']):
                 return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "stato"}}}'
-            elif match_any(['quali profili', 'profili disponibili', 'elenco profili', 'lista profili']):
+            elif match_any(['quali profili', 'profili disponibili', 'elenco profili', 'lista profili', 'elenca profili']):
                 return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "lista"}}}'
             elif profilo_trovato:
                 return f'{{"function_call": {{"name": "cambia_profilo", "arguments": {{"azione": "cambia", "profilo": "{profilo_trovato}"}}}}}}'
@@ -242,8 +242,14 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return '{"function_call": {"name": "osterie_goliardiche"}}'
 
         # ============ GIANNINI (Easter Egg EPICO!) ============
-        if 'giannini' in text_lower or 'giannino' in text_lower:
-            return f'{{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "{text}"}}}}}}'
+        # IMPORTANTE: Solo domande brevi o dirette, NON risposte lunghe che contengono il nome
+        has_giannino = 'giannini' in text_lower or 'giannino' in text_lower
+        if has_giannino:
+            # Solo se: testo corto (<60 char) O domanda esplicita
+            is_question = match_any(['chi è', 'chi e', 'conosci', 'parlami di', 'dimmi di', 'sai chi è'])
+            is_short = len(text.strip()) < 60
+            if is_short or is_question:
+                return f'{{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "{text}"}}}}}}'
 
         # ============ RICETTE CON INGREDIENTI (prima di ricette generiche!) ============
         if match_any(['cosa posso cucinare', 'ricette con', 'ho in casa', 'cosa preparo con', 'che piatto faccio con', 'idee ricette']):
@@ -284,8 +290,15 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # Pattern specifici per evitare conflitti
         lingue_trad = ['inglese', 'francese', 'spagnolo', 'tedesco', 'portoghese', 'russo', 'cinese', 'giapponese', 'arabo', 'greco', 'olandese', 'polacco', 'coreano', 'turco', 'hindi']
 
-        # MODALITÀ INTERPRETE CONTINUA: "avvia traduttore in X", "modalità interprete X"
-        if match_any(['avvia traduttore', 'attiva traduttore', 'modalità interprete', 'fai da interprete', 'aiutami a comunicare']):
+        # MODALITÀ INTERPRETE CONTINUA: "avvia traduttore in X", "traduttore in X", "modalità interprete X"
+        # Controlla se è "traduttore in [lingua]" (modalità continua) vs "traduci X in Y" (singola)
+        is_interpreter_mode = match_any(['avvia traduttore', 'attiva traduttore', 'modalità interprete', 'fai da interprete', 'aiutami a comunicare'])
+        # "traduttore in [lingua]" senza testo da tradurre = modalità continua
+        for lingua in lingue_trad:
+            if f"traduttore in {lingua}" in text_lower or f"traduttore {lingua}" in text_lower:
+                is_interpreter_mode = True
+                break
+        if is_interpreter_mode:
             lingua_dest = "inglese"
             for lingua in lingue_trad:
                 if lingua in text_lower:

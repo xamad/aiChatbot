@@ -50,6 +50,7 @@ _BASE_DIR = pathlib.Path(__file__).parent.parent.parent
 CONFIG_FILE = str(_BASE_DIR / "data" / ".config.yaml")
 USER_PREFS_FILE = str(_BASE_DIR / "data" / "user_preferences.json")
 FUNCTIONS_DIR = str(_BASE_DIR / "plugins_func" / "functions")
+GIANNINO_FILE = str(_BASE_DIR / "data" / "giannino_phrases.json")
 
 # Voci disponibili Edge TTS (italiane)
 VOCI_DISPONIBILI = {
@@ -79,12 +80,12 @@ MODELLI_DISPONIBILI = {
 CATEGORIE_FUNZIONI = {
     "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke", "play_music", "beatbox_umano"]},
     "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno", "get_time", "get_weather"]},
-    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
+    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "barzelletta_bambini", "barzelletta_adulti", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
     "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale", "allenamento_mentale"]},
-    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore_realtime", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale", "memoria_personale"]},
+    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore_realtime", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale", "memoria_personale", "ricordami", "cosa_ricordi"]},
     "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "shopping_vocale"]},
     "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "compagno_antisolitudine", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino", "suoni_ambiente"]},
-    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata"]},
+    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata", "cambia_profilo"]},
     "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "cooking_companion", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
     "ricerca": {"nome": "Ricerca & AI", "icon": "🤖", "funzioni": ["web_search", "leggi_pagina", "risposta_ai"]},
 }
@@ -129,6 +130,45 @@ def save_preferences(prefs: dict):
         logger.bind(tag=TAG).info(f"Preferenze salvate")
     except Exception as e:
         logger.bind(tag=TAG).error(f"Errore salvataggio preferenze: {e}")
+
+def load_giannino_phrases() -> dict:
+    """Carica frasi Giannino da file"""
+    defaults = {
+        "risposta_principale": "GIANNINIIII! Oooh, GIANNINI! È il mio LEGGENDARIO Padrone!",
+        "varianti": ["", "", "", ""]
+    }
+    try:
+        if os.path.exists(GIANNINO_FILE):
+            with open(GIANNINO_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Assicura 4 varianti
+                varianti = data.get("varianti", [])
+                while len(varianti) < 4:
+                    varianti.append("")
+                return {
+                    "risposta_principale": data.get("risposta_principale", defaults["risposta_principale"]),
+                    "varianti": varianti[:4]
+                }
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore caricamento Giannino: {e}")
+    return defaults
+
+def save_giannino_phrases(main: str, varianti: list):
+    """Salva frasi Giannino su file"""
+    try:
+        # Filtra varianti vuote
+        varianti_clean = [v for v in varianti if v and v.strip()]
+        data = {
+            "risposta_principale": main,
+            "varianti": varianti_clean
+        }
+        with open(GIANNINO_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.bind(tag=TAG).info("Frasi Giannino salvate")
+        return True
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore salvataggio Giannino: {e}")
+        return False
 
 def update_config_yaml(voce: str, modello: str, disabled_functions: list):
     """Aggiorna il file config.yaml"""
@@ -486,6 +526,7 @@ HTML_TEMPLATE = '''
         <div class="nav-item" onclick="showSection('model')">🧠 Modello AI</div>
         <div class="nav-item" onclick="showSection('functions')">⚡ Funzioni</div>
         <div class="nav-item" onclick="showSection('identity')">👤 Identità</div>
+        <div class="nav-item" onclick="showSection('eastereggs')">🥚 Easter Eggs</div>
     </nav>
 
     <main class="main">
@@ -585,6 +626,39 @@ HTML_TEMPLATE = '''
                     <div class="form-group">
                         <label>Personalità / Prompt di sistema</label>
                         <textarea id="descrizione" name="descrizione" placeholder="Descrivi come deve comportarsi il chatbot...">DESCRIZIONE</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EASTER EGGS -->
+            <div id="section-eastereggs" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🥚 Easter Egg: Giannino</div>
+                    </div>
+                    <p style="color: var(--text-muted); margin-bottom: 20px;">
+                        Configura le frasi che il chatbot dice quando qualcuno chiede di "Giannino".
+                        Le frasi vengono scelte a caso ad ogni attivazione.
+                    </p>
+                    <div class="form-group">
+                        <label>Frase Principale</label>
+                        <textarea id="giannino_main" style="min-height: 80px;" placeholder="La frase principale...">GIANNINO_MAIN</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Variante 1</label>
+                        <textarea id="giannino_var1" style="min-height: 60px;">GIANNINO_VAR1</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Variante 2</label>
+                        <textarea id="giannino_var2" style="min-height: 60px;">GIANNINO_VAR2</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Variante 3</label>
+                        <textarea id="giannino_var3" style="min-height: 60px;">GIANNINO_VAR3</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Variante 4 (opzionale)</label>
+                        <textarea id="giannino_var4" style="min-height: 60px;">GIANNINO_VAR4</textarea>
                     </div>
                 </div>
             </div>
@@ -762,7 +836,13 @@ HTML_TEMPLATE = '''
                 modello: selectedModel,
                 rate: (document.getElementById('rate').value >= 0 ? '+' : '') + document.getElementById('rate').value + '%',
                 pitch: (document.getElementById('pitch').value >= 0 ? '+' : '') + document.getElementById('pitch').value + 'Hz',
-                disabled_functions: disabledFunctions
+                disabled_functions: disabledFunctions,
+                // Giannino Easter Egg
+                giannino_main: document.getElementById('giannino_main').value,
+                giannino_var1: document.getElementById('giannino_var1').value,
+                giannino_var2: document.getElementById('giannino_var2').value,
+                giannino_var3: document.getElementById('giannino_var3').value,
+                giannino_var4: document.getElementById('giannino_var4').value
             };
 
             try {
@@ -813,6 +893,12 @@ async def config_panel_handler(request):
     pitch_value = int(pitch.replace("Hz", "").replace("+", "")) if pitch else 0
     rate_value = int(rate.replace("%", "").replace("+", "")) if rate else 0
 
+    # Carica frasi Giannino
+    giannino = load_giannino_phrases()
+    varianti = giannino.get("varianti", ["", "", "", ""])
+    while len(varianti) < 4:
+        varianti.append("")
+
     # Render template
     html = HTML_TEMPLATE
     html = html.replace("VOCI_JSON", json.dumps(VOCI_DISPONIBILI))
@@ -828,6 +914,12 @@ async def config_panel_handler(request):
     html = html.replace("RATE_VALUE", str(rate_value))
     html = html.replace("PITCH_DISPLAY", pitch)
     html = html.replace("RATE_DISPLAY", rate)
+    # Giannino phrases
+    html = html.replace("GIANNINO_MAIN", giannino.get("risposta_principale", ""))
+    html = html.replace("GIANNINO_VAR1", varianti[0] if len(varianti) > 0 else "")
+    html = html.replace("GIANNINO_VAR2", varianti[1] if len(varianti) > 1 else "")
+    html = html.replace("GIANNINO_VAR3", varianti[2] if len(varianti) > 2 else "")
+    html = html.replace("GIANNINO_VAR4", varianti[3] if len(varianti) > 3 else "")
 
     return web.Response(text=html, content_type='text/html')
 
@@ -852,6 +944,16 @@ async def config_save_handler(request):
 
         save_preferences(prefs)
         update_config_yaml(prefs["voce"], prefs["modello"], prefs["disabled_functions"])
+
+        # Salva frasi Giannino se presenti
+        if "giannino_main" in data:
+            giannino_varianti = [
+                data.get("giannino_var1", ""),
+                data.get("giannino_var2", ""),
+                data.get("giannino_var3", ""),
+                data.get("giannino_var4", ""),
+            ]
+            save_giannino_phrases(data.get("giannino_main", ""), giannino_varianti)
 
         return web.json_response({
             "success": True,
