@@ -3,7 +3,7 @@
 > Documento di architettura per l'integrazione di sensori ESP32, LoRa/Meshtastic e hub locale con il chatbot vocale Xiaozhi.
 
 **Data**: Gennaio 2025
-**Versione**: 2.1 (Deep sleep, monitoring, gestione offline)
+**Versione**: 2.2 (Firmware, OS, integrazione Xiaozhi, alert push)
 
 ---
 
@@ -1267,6 +1267,1185 @@ mqtt:
 
 ---
 
+## Firmware e Sistemi Operativi
+
+### Tabella Firmware per Dispositivo
+
+| Dispositivo | Firmware | Versione | Note |
+|-------------|----------|----------|------|
+| **ESP32-C3 Mini** (Chatbot) | [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) | main | Client vocale AI |
+| **ESP32-S3** (Gateway) | [zh_gateway](https://github.com/aZholtikov/zh_gateway) | latest | ESP-IDF, preferito |
+| **ESP32-S3** (Gateway alt.) | [ESP-NOW-Gateway](https://github.com/aZholtikov/ESP-NOW-Gateway) | v1.42+ | Arduino, più semplice |
+| **ESP32-WROOM** (Sensori) | [ESPHome](https://esphome.io/) | 2025.8+ | ESP-NOW nativo YAML |
+| **ESP32-WROOM** (Sensori alt.) | [ZHNetwork](https://github.com/aZholtikov/ZHNetwork) | latest | Mesh custom |
+| **ESP32 + DX-LR-30** (LoRa) | Custom Arduino | - | Vedi sezione sotto |
+| **Heltec V3** | [Meshtastic](https://meshtastic.org/downloads) | 2.5+ | Firmware ufficiale |
+| **ESP32-CAM** | [ESPHome camera](https://esphome.io/components/esp32_camera.html) | latest | RTSP stream |
+
+### Sistemi Operativi Hub Locale
+
+#### LuckFox Pico (Consigliato)
+
+| OS | Download | Note |
+|----|----------|------|
+| **Buildroot Linux** (ufficiale) | [LuckFox SDK](https://github.com/LuckfoxTECH/luckfox-pico) | Leggero, consigliato |
+| **Ubuntu 22.04** | [LuckFox Images](https://github.com/LuckfoxTECH/luckfox-pico/releases) | Più pesante ma familiare |
+
+```bash
+# Setup Buildroot LuckFox
+# 1. Download immagine
+wget https://github.com/LuckfoxTECH/luckfox-pico/releases/download/v1.3/LuckFox_Pico_Ultra_Buildroot.img.xz
+
+# 2. Flash su SD card
+xzcat LuckFox_Pico_Ultra_Buildroot.img.xz | sudo dd of=/dev/sdX bs=4M status=progress
+
+# 3. Boot e connetti via SSH
+ssh root@192.168.1.xxx  # Password: luckfox
+
+# 4. Installa dipendenze IoT
+opkg update
+opkg install mosquitto mosquitto-client python3 python3-pip
+pip3 install paho-mqtt flask piper-tts
+```
+
+#### Raspberry Pi (Alternativa)
+
+| OS | Download | Note |
+|----|----------|------|
+| **Raspberry Pi OS Lite** | [Official](https://www.raspberrypi.com/software/) | Headless, consigliato |
+| **DietPi** | [DietPi.com](https://dietpi.com/) | Ultra-leggero |
+| **Home Assistant OS** | [HA](https://www.home-assistant.io/) | Se usi già HA |
+
+```bash
+# Setup Raspberry Pi per IoT Hub
+sudo apt update && sudo apt install -y \
+    mosquitto mosquitto-clients \
+    python3-pip python3-venv \
+    sqlite3
+
+# Piper TTS
+pip3 install piper-tts
+piper --download-voice it_IT-riccardo-medium
+
+# Servizi
+sudo systemctl enable mosquitto
+```
+
+### Firmware Custom LoRa (ESP32 + DX-LR-30)
+
+```cpp
+// lora_sensor_node.ino - Nodo outdoor con DX-LR-30
+#include <SPI.h>
+#include <LoRa.h>
+#include <esp_sleep.h>
+#include <ArduinoJson.h>
+
+// Pin DX-LR-30 → ESP32
+#define LORA_SCK   18
+#define LORA_MISO  19
+#define LORA_MOSI  23
+#define LORA_SS    5
+#define LORA_RST   14
+#define LORA_DIO0  26
+
+// Configurazione EU868
+#define LORA_FREQ  868E6
+#define LORA_SF    10      // Spreading Factor
+#define LORA_BW    125E3   // Bandwidth
+#define LORA_TX_POWER 17   // dBm
+
+// Sleep
+#define SLEEP_MINUTES 5
+
+void setup() {
+    Serial.begin(115200);
+
+    // Init LoRa
+    LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+    if (!LoRa.begin(LORA_FREQ)) {
+        Serial.println("LoRa init failed!");
+        esp_deep_sleep_start();
+    }
+
+    LoRa.setSpreadingFactor(LORA_SF);
+    LoRa.setSignalBandwidth(LORA_BW);
+    LoRa.setTxPower(LORA_TX_POWER);
+
+    // Leggi sensori
+    float temp = readTemperature();
+    float humidity = readHumidity();
+    float battery = readBattery();
+
+    // Prepara JSON
+    StaticJsonDocument<200> doc;
+    doc["node"] = "serra";
+    doc["temp"] = temp;
+    doc["hum"] = humidity;
+    doc["bat"] = battery;
+    doc["ts"] = millis();
+
+    String payload;
+    serializeJson(doc, payload);
+
+    // Invia via LoRa
+    LoRa.beginPacket();
+    LoRa.print(payload);
+    LoRa.endPacket(true);  // async
+
+    // Attendi TX completato
+    delay(100);
+
+    // Deep sleep
+    esp_sleep_enable_timer_wakeup(SLEEP_MINUTES * 60 * 1000000ULL);
+    esp_deep_sleep_start();
+}
+
+void loop() {
+    // Mai raggiunto
+}
+```
+
+---
+
+## Integrazione Xiaozhi Chatbot
+
+### Architettura Plugin Domotica
+
+Il chatbot Xiaozhi integra funzioni vocali per il controllo della rete IoT mesh:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    XIAOZHI SERVER (VPS)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  plugins_func/functions/                                         │
+│  ├── domotica.py           → Controllo dispositivi Tuya/MQTT    │
+│  ├── hass_control.py       → Integrazione Home Assistant        │
+│  ├── mesh_iot_monitor.py   → Monitor sensori mesh (NUOVO)       │
+│  ├── mesh_alerts.py        → Gestione allarmi IoT (NUOVO)       │
+│  └── automazioni_vocali.py → Trigger automazioni (NUOVO)        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Plugin: Monitor Sensori Mesh
+
+```python
+# plugins_func/functions/mesh_iot_monitor.py
+"""
+Monitor vocale per rete sensori Mesh IoT
+Trigger: "temperatura serra", "stato sensori", "batteria nodi"
+"""
+
+import json
+import asyncio
+from datetime import datetime, timedelta
+from config.logger import setup_logging
+from plugins_func.register import register_function, ToolType, ActionResponse, Action
+
+TAG = __name__
+logger = setup_logging()
+
+# Client MQTT globale (inizializzato all'avvio)
+mqtt_client = None
+sensor_cache = {}  # Cache ultime letture
+
+MESH_MONITOR_DESC = {
+    "type": "function",
+    "function": {
+        "name": "mesh_iot_monitor",
+        "description": (
+            "Legge stato sensori dalla rete mesh IoT. "
+            "Trigger: temperatura serra, umidità cucina, stato sensori, "
+            "batteria nodi, quanti gradi ci sono in garage"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "Posizione sensore: cucina, soggiorno, serra, garage, esterno"
+                },
+                "sensor_type": {
+                    "type": "string",
+                    "enum": ["temperatura", "umidita", "gas", "movimento", "batteria", "tutti"],
+                    "description": "Tipo di dato richiesto"
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["read", "status", "history"],
+                    "description": "Azione: lettura singola, stato sistema, storico"
+                }
+            },
+            "required": ["action"]
+        }
+    }
+}
+
+
+def get_sensor_data(location: str = None, sensor_type: str = None) -> dict:
+    """Recupera dati sensori dalla cache MQTT"""
+    results = {}
+
+    for topic, data in sensor_cache.items():
+        # Filtra per location
+        if location and location.lower() not in topic.lower():
+            continue
+
+        # Filtra per tipo sensore
+        if sensor_type and sensor_type != "tutti":
+            if sensor_type not in topic.lower():
+                continue
+
+        age = (datetime.now() - data['timestamp']).seconds
+        results[topic] = {
+            **data,
+            'age_seconds': age,
+            'stale': age > 600  # >10 min = dato vecchio
+        }
+
+    return results
+
+
+def format_sensor_response(data: dict, location: str = None) -> tuple:
+    """Formatta risposta per TTS"""
+    if not data:
+        text = f"Non ho dati recenti per {location or 'i sensori'}."
+        return text, text
+
+    spoken_parts = []
+    display_parts = []
+
+    for topic, info in data.items():
+        node = topic.split('/')[-2] if '/' in topic else topic
+        sensor = topic.split('/')[-1] if '/' in topic else 'valore'
+        value = info.get('value', 'N/A')
+
+        if 'temperatura' in sensor.lower() or 'temp' in sensor.lower():
+            spoken_parts.append(f"{node}: {value} gradi")
+            display_parts.append(f"🌡️ {node}: {value}°C")
+        elif 'umidita' in sensor.lower() or 'hum' in sensor.lower():
+            spoken_parts.append(f"{node}: {value} percento di umidità")
+            display_parts.append(f"💧 {node}: {value}%")
+        elif 'gas' in sensor.lower():
+            spoken_parts.append(f"{node}: livello gas {value}")
+            display_parts.append(f"⚠️ {node} gas: {value}")
+        elif 'battery' in sensor.lower() or 'bat' in sensor.lower():
+            spoken_parts.append(f"{node}: batteria al {value} percento")
+            display_parts.append(f"🔋 {node}: {value}%")
+        else:
+            spoken_parts.append(f"{node} {sensor}: {value}")
+            display_parts.append(f"📊 {node} {sensor}: {value}")
+
+        if info.get('stale'):
+            display_parts[-1] += " ⚠️(vecchio)"
+
+    spoken = ". ".join(spoken_parts[:5])  # Max 5 per TTS
+    display = "\n".join(display_parts)
+
+    return display, spoken
+
+
+@register_function('mesh_iot_monitor', MESH_MONITOR_DESC, ToolType.WAIT)
+def mesh_iot_monitor(conn, action: str = "read", location: str = None, sensor_type: str = None):
+    """Legge stato sensori mesh"""
+    logger.bind(tag=TAG).info(f"Mesh monitor: action={action}, location={location}, type={sensor_type}")
+
+    if action == "status":
+        # Stato generale sistema
+        total = len(sensor_cache)
+        stale = sum(1 for d in sensor_cache.values()
+                   if (datetime.now() - d['timestamp']).seconds > 600)
+        online = total - stale
+
+        display = f"**Stato Rete Mesh IoT**\n\n"
+        display += f"📡 Sensori totali: {total}\n"
+        display += f"✅ Online: {online}\n"
+        display += f"⚠️ Non risponde: {stale}\n"
+
+        spoken = f"La rete mesh ha {total} sensori, {online} online"
+        if stale > 0:
+            spoken += f", attenzione {stale} non rispondono"
+
+        return ActionResponse(Action.RESPONSE, display, spoken)
+
+    elif action == "read":
+        data = get_sensor_data(location, sensor_type)
+        display, spoken = format_sensor_response(data, location)
+
+        if location:
+            intro = f"**Sensori {location.title()}**\n\n"
+        else:
+            intro = "**Letture Sensori**\n\n"
+
+        return ActionResponse(Action.RESPONSE, intro + display, spoken)
+
+    elif action == "history":
+        # TODO: Implementare storico da SQLite
+        return ActionResponse(
+            Action.RESPONSE,
+            "Storico non ancora implementato",
+            "La funzione storico sarà disponibile presto"
+        )
+
+    return ActionResponse(Action.RESPONSE, "Comando non riconosciuto", "Non ho capito la richiesta")
+
+
+# === MQTT Callback per popolare cache ===
+def on_mesh_message(client, userdata, msg):
+    """Callback MQTT per aggiornare cache sensori"""
+    try:
+        topic = msg.topic
+        payload = json.loads(msg.payload.decode())
+
+        sensor_cache[topic] = {
+            'value': payload.get('value', payload),
+            'timestamp': datetime.now(),
+            'raw': payload
+        }
+
+        logger.bind(tag=TAG).debug(f"Sensor update: {topic} = {payload}")
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"MQTT parse error: {e}")
+
+
+def init_mqtt_listener(broker: str, port: int = 1883):
+    """Inizializza listener MQTT per sensori mesh"""
+    import paho.mqtt.client as mqtt
+
+    global mqtt_client
+    mqtt_client = mqtt.Client()
+    mqtt_client.on_message = on_mesh_message
+    mqtt_client.connect(broker, port)
+    mqtt_client.subscribe("mesh/#")
+    mqtt_client.loop_start()
+
+    logger.bind(tag=TAG).info(f"MQTT listener started for mesh sensors")
+```
+
+### Plugin: Gestione Allarmi IoT
+
+```python
+# plugins_func/functions/mesh_alerts.py
+"""
+Gestione allarmi dalla rete mesh IoT
+Riceve alert (gas, fumo, intrusione) e notifica vocalmente
+"""
+
+import json
+import asyncio
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+from config.logger import setup_logging
+from plugins_func.register import register_function, ToolType, ActionResponse, Action
+
+TAG = __name__
+logger = setup_logging()
+
+class AlertLevel(Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+    EMERGENCY = "emergency"
+
+# Storico allarmi
+alert_history = []
+active_alerts = {}
+
+# Configurazione soglie
+ALERT_THRESHOLDS = {
+    "gas": {"warning": 500, "critical": 800, "emergency": 1000},
+    "fumo": {"warning": 100, "critical": 200, "emergency": 300},
+    "temperatura": {"warning": 35, "critical": 45, "emergency": 60},
+    "batteria": {"warning": 20, "critical": 10, "emergency": 5},
+}
+
+MESH_ALERTS_DESC = {
+    "type": "function",
+    "function": {
+        "name": "mesh_alerts",
+        "description": (
+            "Gestisce allarmi dalla rete IoT mesh. "
+            "Trigger: ci sono allarmi, stato allarmi, silenzia allarme, "
+            "storico allarmi, emergenze attive"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "history", "silence", "test"],
+                    "description": "Azione: stato, storico, silenzia, test"
+                },
+                "alert_id": {
+                    "type": "string",
+                    "description": "ID allarme da silenziare"
+                }
+            },
+            "required": ["action"]
+        }
+    }
+}
+
+
+def process_alert(topic: str, value: float, node: str) -> Optional[dict]:
+    """Processa un valore e genera allarme se necessario"""
+    sensor_type = None
+    for t in ALERT_THRESHOLDS.keys():
+        if t in topic.lower():
+            sensor_type = t
+            break
+
+    if not sensor_type:
+        return None
+
+    thresholds = ALERT_THRESHOLDS[sensor_type]
+    level = None
+
+    # Batteria ha logica invertita
+    if sensor_type == "batteria":
+        if value <= thresholds["emergency"]:
+            level = AlertLevel.EMERGENCY
+        elif value <= thresholds["critical"]:
+            level = AlertLevel.CRITICAL
+        elif value <= thresholds["warning"]:
+            level = AlertLevel.WARNING
+    else:
+        if value >= thresholds["emergency"]:
+            level = AlertLevel.EMERGENCY
+        elif value >= thresholds["critical"]:
+            level = AlertLevel.CRITICAL
+        elif value >= thresholds["warning"]:
+            level = AlertLevel.WARNING
+
+    if level:
+        alert = {
+            "id": f"{node}_{sensor_type}_{datetime.now().strftime('%H%M%S')}",
+            "node": node,
+            "sensor": sensor_type,
+            "value": value,
+            "level": level.value,
+            "timestamp": datetime.now(),
+            "acknowledged": False
+        }
+        return alert
+
+    return None
+
+
+def get_alert_message(alert: dict) -> tuple:
+    """Genera messaggio vocale per allarme"""
+    level = alert["level"]
+    node = alert["node"]
+    sensor = alert["sensor"]
+    value = alert["value"]
+
+    if level == "emergency":
+        prefix = "🚨 EMERGENZA!"
+        spoken_prefix = "Attenzione! Emergenza!"
+    elif level == "critical":
+        prefix = "⚠️ ALLARME CRITICO"
+        spoken_prefix = "Allarme critico!"
+    else:
+        prefix = "⚡ Avviso"
+        spoken_prefix = "Avviso."
+
+    messages = {
+        "gas": (f"{prefix} Gas elevato in {node}: {value}",
+                f"{spoken_prefix} Rilevato gas elevato in {node}. Valore {value}. Verifica immediatamente!"),
+        "fumo": (f"{prefix} Fumo rilevato in {node}: {value}",
+                 f"{spoken_prefix} Fumo rilevato in {node}! Controlla subito!"),
+        "temperatura": (f"{prefix} Temperatura alta in {node}: {value}°C",
+                        f"{spoken_prefix} Temperatura troppo alta in {node}. {value} gradi."),
+        "batteria": (f"{prefix} Batteria scarica {node}: {value}%",
+                     f"{spoken_prefix} La batteria di {node} è quasi scarica. {value} percento."),
+    }
+
+    return messages.get(sensor, (f"{prefix} {sensor} in {node}: {value}",
+                                  f"{spoken_prefix} {sensor} anomalo in {node}"))
+
+
+@register_function('mesh_alerts', MESH_ALERTS_DESC, ToolType.WAIT)
+def mesh_alerts(conn, action: str = "status", alert_id: str = None):
+    """Gestisce allarmi mesh"""
+    logger.bind(tag=TAG).info(f"Mesh alerts: action={action}")
+
+    if action == "status":
+        if not active_alerts:
+            return ActionResponse(
+                Action.RESPONSE,
+                "✅ **Nessun allarme attivo**\n\nTutti i sensori sono nella norma.",
+                "Nessun allarme attivo. Tutti i sensori sono nella norma."
+            )
+
+        display = "**🚨 ALLARMI ATTIVI**\n\n"
+        spoken_parts = [f"Ci sono {len(active_alerts)} allarmi attivi."]
+
+        for aid, alert in active_alerts.items():
+            level_icon = {"emergency": "🚨", "critical": "⚠️", "warning": "⚡"}.get(alert["level"], "ℹ️")
+            display += f"{level_icon} **{alert['node']}** - {alert['sensor']}: {alert['value']}\n"
+            display += f"   Ora: {alert['timestamp'].strftime('%H:%M:%S')}\n\n"
+
+            if alert["level"] in ["emergency", "critical"]:
+                spoken_parts.append(f"{alert['sensor']} in {alert['node']}")
+
+        return ActionResponse(Action.RESPONSE, display, " ".join(spoken_parts))
+
+    elif action == "history":
+        if not alert_history:
+            return ActionResponse(
+                Action.RESPONSE,
+                "📜 Nessun allarme nello storico recente",
+                "Non ci sono allarmi nello storico recente"
+            )
+
+        display = "**📜 Storico Allarmi (ultime 24h)**\n\n"
+        for alert in alert_history[-10:]:  # Ultimi 10
+            level_icon = {"emergency": "🚨", "critical": "⚠️", "warning": "⚡"}.get(alert["level"], "ℹ️")
+            display += f"{level_icon} {alert['timestamp'].strftime('%H:%M')} - {alert['node']}: {alert['sensor']} ({alert['value']})\n"
+
+        return ActionResponse(
+            Action.RESPONSE,
+            display,
+            f"Ci sono {len(alert_history)} allarmi nello storico recente"
+        )
+
+    elif action == "silence":
+        if alert_id and alert_id in active_alerts:
+            alert = active_alerts.pop(alert_id)
+            alert["acknowledged"] = True
+            alert_history.append(alert)
+            return ActionResponse(
+                Action.RESPONSE,
+                f"✅ Allarme {alert_id} silenziato",
+                f"Allarme {alert['node']} silenziato"
+            )
+        elif not alert_id and active_alerts:
+            # Silenzia tutti
+            count = len(active_alerts)
+            for a in active_alerts.values():
+                a["acknowledged"] = True
+                alert_history.append(a)
+            active_alerts.clear()
+            return ActionResponse(
+                Action.RESPONSE,
+                f"✅ {count} allarmi silenziati",
+                f"Ho silenziato {count} allarmi"
+            )
+        else:
+            return ActionResponse(
+                Action.RESPONSE,
+                "Nessun allarme da silenziare",
+                "Non ci sono allarmi da silenziare"
+            )
+
+    elif action == "test":
+        # Test allarme
+        test_alert = {
+            "id": "test_001",
+            "node": "test",
+            "sensor": "gas",
+            "value": 850,
+            "level": "critical",
+            "timestamp": datetime.now(),
+            "acknowledged": False
+        }
+        active_alerts["test_001"] = test_alert
+        display, spoken = get_alert_message(test_alert)
+        return ActionResponse(Action.RESPONSE, display, spoken)
+
+    return ActionResponse(Action.RESPONSE, "Comando non riconosciuto", "Non ho capito")
+
+
+# === Callback MQTT per allarmi ===
+def on_alert_message(client, userdata, msg):
+    """Callback per messaggi di allarme"""
+    try:
+        topic = msg.topic
+        payload = json.loads(msg.payload.decode())
+
+        # Estrai nodo dal topic
+        parts = topic.split('/')
+        node = parts[2] if len(parts) > 2 else "unknown"
+
+        value = payload.get('value', payload)
+        if isinstance(value, (int, float)):
+            alert = process_alert(topic, value, node)
+
+            if alert:
+                active_alerts[alert["id"]] = alert
+                alert_history.append(alert)
+
+                # Trigger notifica vocale immediata per emergenze
+                if alert["level"] in ["emergency", "critical"]:
+                    display, spoken = get_alert_message(alert)
+                    logger.bind(tag=TAG).warning(f"ALERT: {spoken}")
+                    # TODO: Invia a tutti i client connessi
+                    # broadcast_to_clients(spoken)
+
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Alert processing error: {e}")
+```
+
+### Plugin: Automazioni Vocali
+
+```python
+# plugins_func/functions/automazioni_vocali.py
+"""
+Trigger automazioni IoT tramite comandi vocali
+Trigger: "modalità notte", "scenario cinema", "risparmio energetico"
+"""
+
+import json
+from config.logger import setup_logging
+from plugins_func.register import register_function, ToolType, ActionResponse, Action
+
+TAG = __name__
+logger = setup_logging()
+
+# Definizione scenari/automazioni
+AUTOMAZIONI = {
+    "notte": {
+        "nome": "Modalità Notte",
+        "descrizione": "Spegne luci, attiva sensori movimento, abbassa tapparelle",
+        "azioni": [
+            {"topic": "mesh/comandi/soggiorno/luce", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/cucina/luce", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/camera/luce", "payload": {"action": "off", "brightness": 5}},
+            {"topic": "mesh/comandi/ingresso/sensore_movimento", "payload": {"action": "arm"}},
+            {"topic": "mesh/comandi/tapparelle/tutte", "payload": {"action": "close"}},
+        ],
+        "spoken": "Modalità notte attivata. Luci spente, sensori armati, tapparelle chiuse."
+    },
+    "giorno": {
+        "nome": "Modalità Giorno",
+        "descrizione": "Alza tapparelle, disattiva allarme movimento",
+        "azioni": [
+            {"topic": "mesh/comandi/tapparelle/tutte", "payload": {"action": "open"}},
+            {"topic": "mesh/comandi/ingresso/sensore_movimento", "payload": {"action": "disarm"}},
+        ],
+        "spoken": "Buongiorno! Tapparelle aperte, sensori disattivati."
+    },
+    "cinema": {
+        "nome": "Scenario Cinema",
+        "descrizione": "Abbassa luci soggiorno, chiude tapparelle",
+        "azioni": [
+            {"topic": "mesh/comandi/soggiorno/luce", "payload": {"action": "dim", "brightness": 10}},
+            {"topic": "mesh/comandi/soggiorno/tapparella", "payload": {"action": "close"}},
+        ],
+        "spoken": "Scenario cinema attivato. Luci soffuse, tapparelle chiuse. Buona visione!"
+    },
+    "risparmio": {
+        "nome": "Risparmio Energetico",
+        "descrizione": "Spegne dispositivi non essenziali",
+        "azioni": [
+            {"topic": "mesh/comandi/standby/tv", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/standby/console", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/luci/tutte", "payload": {"action": "off"}},
+        ],
+        "spoken": "Modalità risparmio energetico. Ho spento TV, console e tutte le luci."
+    },
+    "emergenza": {
+        "nome": "Emergenza",
+        "descrizione": "Accende tutte le luci, apre tapparelle, invia alert",
+        "azioni": [
+            {"topic": "mesh/comandi/luci/tutte", "payload": {"action": "on", "brightness": 100}},
+            {"topic": "mesh/comandi/tapparelle/tutte", "payload": {"action": "open"}},
+            {"topic": "mesh/system/alerts", "payload": {"type": "emergency", "source": "voice"}},
+            {"topic": "meshtastic/tx", "payload": {"to": "broadcast", "text": "🚨 EMERGENZA ATTIVATA DA VOCE"}},
+        ],
+        "spoken": "Emergenza! Ho acceso tutte le luci, aperto le tapparelle e inviato un allarme."
+    },
+    "esco": {
+        "nome": "Uscita Casa",
+        "descrizione": "Spegne tutto, arma sensori, chiude tapparelle",
+        "azioni": [
+            {"topic": "mesh/comandi/luci/tutte", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/prese/non_essenziali", "payload": {"action": "off"}},
+            {"topic": "mesh/comandi/tapparelle/tutte", "payload": {"action": "close"}},
+            {"topic": "mesh/comandi/allarme", "payload": {"action": "arm", "mode": "away"}},
+        ],
+        "spoken": "Casa in modalità assente. Luci spente, allarme attivo. Buona giornata!"
+    },
+    "arrivo": {
+        "nome": "Arrivo Casa",
+        "descrizione": "Disarma allarme, accende luci ingresso",
+        "azioni": [
+            {"topic": "mesh/comandi/allarme", "payload": {"action": "disarm"}},
+            {"topic": "mesh/comandi/ingresso/luce", "payload": {"action": "on"}},
+        ],
+        "spoken": "Bentornato a casa! Allarme disattivato, luce ingresso accesa."
+    },
+}
+
+AUTOMAZIONI_DESC = {
+    "type": "function",
+    "function": {
+        "name": "automazioni_vocali",
+        "description": (
+            "Attiva scenari e automazioni domotiche. "
+            "Trigger: modalità notte, scenario cinema, risparmio energetico, "
+            "esco di casa, sono a casa, emergenza, quali automazioni hai"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scenario": {
+                    "type": "string",
+                    "enum": list(AUTOMAZIONI.keys()) + ["lista"],
+                    "description": "Nome scenario da attivare o 'lista' per elencare"
+                }
+            },
+            "required": ["scenario"]
+        }
+    }
+}
+
+
+@register_function('automazioni_vocali', AUTOMAZIONI_DESC, ToolType.SYSTEM)
+def automazioni_vocali(conn, scenario: str):
+    """Attiva automazione/scenario"""
+    logger.bind(tag=TAG).info(f"Automazione richiesta: {scenario}")
+
+    if scenario == "lista":
+        display = "**🏠 Automazioni Disponibili**\n\n"
+        spoken_list = []
+
+        for key, auto in AUTOMAZIONI.items():
+            display += f"• **{auto['nome']}**: {auto['descrizione']}\n"
+            display += f"  _Dì: \"{key}\"_\n\n"
+            spoken_list.append(auto['nome'])
+
+        spoken = "Le automazioni disponibili sono: " + ", ".join(spoken_list)
+        return ActionResponse(Action.RESPONSE, display, spoken)
+
+    if scenario not in AUTOMAZIONI:
+        return ActionResponse(
+            Action.RESPONSE,
+            f"Automazione '{scenario}' non trovata. Dì 'quali automazioni hai' per l'elenco.",
+            f"Non conosco l'automazione {scenario}. Chiedimi quali automazioni ho."
+        )
+
+    auto = AUTOMAZIONI[scenario]
+
+    # Esegui azioni MQTT
+    executed = 0
+    for azione in auto["azioni"]:
+        try:
+            # mqtt_client.publish(azione["topic"], json.dumps(azione["payload"]))
+            logger.bind(tag=TAG).info(f"MQTT publish: {azione['topic']} = {azione['payload']}")
+            executed += 1
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"Errore azione: {e}")
+
+    display = f"**{auto['nome']}** ✅\n\n"
+    display += f"{auto['descrizione']}\n\n"
+    display += f"_Eseguite {executed}/{len(auto['azioni'])} azioni_"
+
+    return ActionResponse(Action.RESPONSE, display, auto["spoken"])
+```
+
+### Pattern Intent per Domotica
+
+Aggiungi a `intent_llm.py`:
+
+```python
+# ============ MESH IOT MONITOR ============
+if match_any(['temperatura serra', 'umidità cucina', 'stato sensori',
+              'sensori mesh', 'batteria nodi', 'quanti gradi']):
+    location = None
+    for loc in ['cucina', 'soggiorno', 'serra', 'garage', 'camera', 'bagno', 'esterno']:
+        if loc in text_lower:
+            location = loc
+            break
+
+    sensor_type = "tutti"
+    for st in ['temperatura', 'umidita', 'gas', 'movimento', 'batteria']:
+        if st in text_lower:
+            sensor_type = st
+            break
+
+    if location:
+        return f'{{"function_call": {{"name": "mesh_iot_monitor", "arguments": {{"action": "read", "location": "{location}", "sensor_type": "{sensor_type}"}}}}}}'
+    return '{"function_call": {"name": "mesh_iot_monitor", "arguments": {"action": "status"}}}'
+
+# ============ ALLARMI MESH ============
+if match_any(['ci sono allarmi', 'stato allarmi', 'allarmi attivi',
+              'emergenze', 'silenzia allarme', 'storico allarmi']):
+    if 'silenzia' in text_lower:
+        return '{"function_call": {"name": "mesh_alerts", "arguments": {"action": "silence"}}}'
+    if 'storico' in text_lower:
+        return '{"function_call": {"name": "mesh_alerts", "arguments": {"action": "history"}}}'
+    return '{"function_call": {"name": "mesh_alerts", "arguments": {"action": "status"}}}'
+
+# ============ AUTOMAZIONI VOCALI ============
+automazioni_trigger = {
+    'notte': ['modalità notte', 'buonanotte', 'vado a dormire'],
+    'giorno': ['modalità giorno', 'buongiorno', 'sveglia'],
+    'cinema': ['scenario cinema', 'modalità film', 'voglio guardare un film'],
+    'risparmio': ['risparmio energetico', 'risparmia energia', 'spegni tutto'],
+    'emergenza': ['emergenza', 'aiuto emergenza', 'allarme'],
+    'esco': ['esco di casa', 'vado via', 'uscita'],
+    'arrivo': ['sono a casa', 'sono arrivato', 'torno a casa'],
+    'lista': ['quali automazioni', 'elenco automazioni', 'scenari disponibili']
+}
+
+for scenario, triggers in automazioni_trigger.items():
+    if match_any(triggers):
+        return f'{{"function_call": {{"name": "automazioni_vocali", "arguments": {{"scenario": "{scenario}"}}}}}}'
+```
+
+### Comandi Vocali Domotica - Riepilogo
+
+| Comando | Funzione | Risposta |
+|---------|----------|----------|
+| "Temperatura serra" | mesh_iot_monitor | "Serra: 24 gradi" |
+| "Stato sensori" | mesh_iot_monitor | Report tutti i sensori |
+| "Batteria nodi" | mesh_iot_monitor | Stato batterie |
+| "Ci sono allarmi?" | mesh_alerts | Allarmi attivi |
+| "Silenzia allarme" | mesh_alerts | Silenzia alert |
+| "Modalità notte" | automazioni_vocali | Spegne luci, arma sensori |
+| "Esco di casa" | automazioni_vocali | Chiude tutto, arma allarme |
+| "Emergenza!" | automazioni_vocali | Accende tutto, invia alert |
+| "Scenario cinema" | automazioni_vocali | Abbassa luci, chiude tapparelle |
+
+---
+
+## Wakeword e Alert Push
+
+### Configurazione Wakeword
+
+Il chatbot ESP32 si attiva con una **wakeword** configurabile. Di default usa rilevamento locale:
+
+```yaml
+# config.yaml (server)
+wakeword:
+  type: "local"           # local | server | always_on
+  word: "xiao zhi"        # Parola di attivazione
+  sensitivity: 0.5        # 0.0-1.0
+  timeout_ms: 5000        # Timeout ascolto dopo wakeword
+```
+
+**Wakeword italiane consigliate** (foneticamente riconoscibili):
+- "Ehi casa"
+- "Ok casa"
+- "Ciao Gino"
+- "Assistente"
+
+### Alert Push: Server → Chatbot
+
+Il server Xiaozhi può **inviare messaggi proattivi** ai chatbot connessi quando riceve allarmi dalla rete mesh:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    FLUSSO ALERT PUSH                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Sensore Gas → ESP-NOW → Gateway → MQTT → VPS Server           │
+│                                                                  │
+│   VPS Server:                                                    │
+│   1. Riceve alert su mesh/indoor/cucina/gas                     │
+│   2. Processa con mesh_alerts.py                                │
+│   3. Se CRITICAL/EMERGENCY → broadcast_alert()                  │
+│                                                                  │
+│   broadcast_alert():                                             │
+│   - Genera TTS audio "Attenzione! Gas rilevato in cucina!"      │
+│   - Invia a TUTTI i chatbot ESP32 connessi via WebSocket        │
+│   - I chatbot riproducono l'audio IMMEDIATAMENTE                │
+│                                                                  │
+│   ESP32 Chatbot → Speaker: "🔊 Attenzione! Gas rilevato..."     │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Implementazione Alert Broadcast
+
+```python
+# core/utils/alert_broadcaster.py
+"""
+Broadcast alert vocali a tutti i chatbot connessi
+"""
+
+import asyncio
+import json
+from typing import Set
+from config.logger import setup_logging
+
+TAG = __name__
+logger = setup_logging()
+
+# Set di connessioni WebSocket attive
+active_connections: Set = set()
+
+
+def register_connection(websocket):
+    """Registra nuova connessione chatbot"""
+    active_connections.add(websocket)
+    logger.bind(tag=TAG).info(f"Chatbot registered. Total: {len(active_connections)}")
+
+
+def unregister_connection(websocket):
+    """Rimuovi connessione chatbot"""
+    active_connections.discard(websocket)
+    logger.bind(tag=TAG).info(f"Chatbot disconnected. Total: {len(active_connections)}")
+
+
+async def broadcast_alert(message: str, level: str = "critical", audio_data: bytes = None):
+    """
+    Invia alert a tutti i chatbot connessi
+
+    Args:
+        message: Testo da pronunciare
+        level: info, warning, critical, emergency
+        audio_data: Audio TTS pre-generato (opzionale)
+    """
+    if not active_connections:
+        logger.bind(tag=TAG).warning("No chatbots connected for alert broadcast")
+        return 0
+
+    # Genera audio TTS se non fornito
+    if audio_data is None:
+        from core.providers.tts.edge import EdgeTTS
+        tts = EdgeTTS()
+        audio_data = await tts.text_to_audio(message)
+
+    # Prepara payload
+    payload = {
+        "type": "alert",
+        "level": level,
+        "message": message,
+        "audio": audio_data.hex() if audio_data else None,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # Broadcast a tutti i client
+    sent_count = 0
+    failed = []
+
+    for ws in active_connections.copy():
+        try:
+            await ws.send(json.dumps(payload))
+            sent_count += 1
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"Failed to send alert: {e}")
+            failed.append(ws)
+
+    # Rimuovi connessioni fallite
+    for ws in failed:
+        active_connections.discard(ws)
+
+    logger.bind(tag=TAG).info(f"Alert broadcast to {sent_count} chatbots: {message[:50]}...")
+    return sent_count
+
+
+async def broadcast_emergency(message: str):
+    """Shortcut per emergenze - massima priorità"""
+    # Aggiungi prefisso vocale
+    emergency_message = f"Attenzione! Emergenza! {message}"
+
+    # Invia con priorità alta
+    return await broadcast_alert(
+        message=emergency_message,
+        level="emergency"
+    )
+
+
+# === Integrazione con mesh_alerts.py ===
+
+def on_critical_alert(alert: dict):
+    """Callback chiamato quando si verifica un alert critico"""
+    message = get_alert_message(alert)[1]  # Versione spoken
+
+    # Broadcast async
+    asyncio.create_task(
+        broadcast_alert(message, level=alert["level"])
+    )
+
+    # Log
+    logger.bind(tag=TAG).warning(f"BROADCAST ALERT: {message}")
+```
+
+### Modifica mesh_alerts.py per Push
+
+```python
+# In mesh_alerts.py, aggiungi alla callback MQTT:
+
+from core.utils.alert_broadcaster import broadcast_alert, broadcast_emergency
+
+def on_alert_message(client, userdata, msg):
+    """Callback per messaggi di allarme CON BROADCAST"""
+    try:
+        topic = msg.topic
+        payload = json.loads(msg.payload.decode())
+
+        parts = topic.split('/')
+        node = parts[2] if len(parts) > 2 else "unknown"
+
+        value = payload.get('value', payload)
+        if isinstance(value, (int, float)):
+            alert = process_alert(topic, value, node)
+
+            if alert:
+                active_alerts[alert["id"]] = alert
+                alert_history.append(alert)
+
+                # === NUOVO: BROADCAST A CHATBOT ===
+                if alert["level"] == "emergency":
+                    # Emergenza: broadcast immediato!
+                    display, spoken = get_alert_message(alert)
+                    asyncio.create_task(broadcast_emergency(spoken))
+
+                elif alert["level"] == "critical":
+                    # Critico: broadcast con messaggio
+                    display, spoken = get_alert_message(alert)
+                    asyncio.create_task(broadcast_alert(spoken, "critical"))
+
+                # Warning: solo log, no broadcast
+                logger.bind(tag=TAG).warning(f"ALERT [{alert['level']}]: {alert}")
+
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Alert processing error: {e}")
+```
+
+### Firmware ESP32: Ricezione Alert
+
+Il firmware xiaozhi-esp32 deve gestire i messaggi alert in arrivo:
+
+```cpp
+// xiaozhi-esp32/src/alert_handler.cpp
+
+#include "alert_handler.h"
+#include "audio_player.h"
+
+void handleServerMessage(const char* json) {
+    StaticJsonDocument<2048> doc;
+    deserializeJson(doc, json);
+
+    const char* type = doc["type"];
+
+    if (strcmp(type, "alert") == 0) {
+        // Messaggio di alert dal server
+        const char* level = doc["level"];
+        const char* message = doc["message"];
+        const char* audioHex = doc["audio"];
+
+        Serial.printf("[ALERT] Level: %s, Message: %s\n", level, message);
+
+        // Interrompi qualsiasi audio in corso
+        AudioPlayer::stop();
+
+        // Riproduci alert
+        if (audioHex != nullptr) {
+            // Audio pre-generato dal server
+            size_t audioLen = strlen(audioHex) / 2;
+            uint8_t* audioData = new uint8_t[audioLen];
+            hexToBytes(audioHex, audioData, audioLen);
+
+            // Riproduci con priorità alta
+            AudioPlayer::playPriority(audioData, audioLen);
+            delete[] audioData;
+        }
+
+        // LED rosso per emergenza
+        if (strcmp(level, "emergency") == 0) {
+            LED::setColor(255, 0, 0);  // Rosso
+            LED::blink(500);           // Lampeggia
+        } else if (strcmp(level, "critical") == 0) {
+            LED::setColor(255, 165, 0);  // Arancione
+        }
+    }
+}
+
+// Nel loop WebSocket principale
+void onWebSocketMessage(uint8_t* payload, size_t length) {
+    char* json = (char*)payload;
+    handleServerMessage(json);
+}
+```
+
+### Configurazione Alert Soglie
+
+```yaml
+# config.yaml - Soglie alert mesh
+mesh_alerts:
+  enabled: true
+  mqtt_broker: "localhost"
+  mqtt_port: 1883
+  mqtt_topics:
+    - "mesh/#"
+
+  thresholds:
+    gas:
+      warning: 500
+      critical: 800
+      emergency: 1000
+    fumo:
+      warning: 100
+      critical: 200
+      emergency: 300
+    temperatura:
+      warning: 35
+      critical: 45
+      emergency: 60
+    batteria:
+      warning: 20
+      critical: 10
+      emergency: 5
+
+  broadcast:
+    enabled: true
+    levels: ["critical", "emergency"]  # Solo questi livelli fanno broadcast
+    cooldown_seconds: 60               # Anti-spam: min 60s tra alert stesso tipo
+    max_per_hour: 10                   # Max 10 alert/ora per tipo
+```
+
+### Flusso Completo Alert
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ESEMPIO: ALERT GAS                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. Sensore MQ-2 cucina rileva gas = 850                                │
+│     └─► ESPHome pubblica: mesh/indoor/cucina/gas {"value": 850}         │
+│                                                                          │
+│  2. Gateway ESP-NOW → MQTT LuckFox → MQTT VPS                           │
+│                                                                          │
+│  3. VPS - mesh_alerts.py:                                               │
+│     └─► process_alert() → level = "critical" (>800)                     │
+│     └─► get_alert_message() → "Allarme critico! Gas elevato in cucina"  │
+│     └─► asyncio.create_task(broadcast_alert(...))                       │
+│                                                                          │
+│  4. VPS - alert_broadcaster.py:                                         │
+│     └─► EdgeTTS genera audio italiano                                   │
+│     └─► WebSocket.send() a tutti i chatbot connessi                     │
+│                                                                          │
+│  5. ESP32 Chatbot (cucina, soggiorno, camera...):                       │
+│     └─► Riceve JSON {"type":"alert", "audio":"..."}                     │
+│     └─► AudioPlayer::playPriority() - INTERROMPE tutto                  │
+│     └─► Speaker: "🔊 Allarme critico! Gas elevato in cucina!"           │
+│     └─► LED arancione lampeggiante                                      │
+│                                                                          │
+│  6. Contemporaneamente:                                                  │
+│     └─► LuckFox → Meshtastic → LoRa → Telefono 📱                       │
+│     └─► active_alerts["cucina_gas_123456"] = {...}                      │
+│                                                                          │
+│  7. Utente: "Silenzia allarme"                                          │
+│     └─► mesh_alerts(action="silence") → Alert rimosso                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Riepilogo Sistema Alert
+
+| Livello | Soglia Gas | Azione | Broadcast | LED |
+|---------|------------|--------|-----------|-----|
+| **Info** | < 500 | Solo log | No | - |
+| **Warning** | 500-800 | Log + storico | No | Giallo |
+| **Critical** | 800-1000 | Log + storico + broadcast | Sì | Arancione |
+| **Emergency** | > 1000 | Tutto + LoRa + automazioni | Sì (priorità) | Rosso lampeggiante |
+
+---
+
 ## Riferimenti
 
 ### Progetti Principali
@@ -1290,6 +2469,18 @@ mqtt:
 ---
 
 ## Changelog
+
+### v2.2 (Gennaio 2025)
+- **Firmware per dispositivo**: Tabella completa firmware ufficiali/custom
+- **Sistemi Operativi**: LuckFox Buildroot/Ubuntu, Raspberry Pi OS/DietPi
+- **Firmware LoRa custom**: Codice Arduino per ESP32 + DX-LR-30
+- **Plugin Xiaozhi IoT**: mesh_iot_monitor, mesh_alerts, automazioni_vocali
+- **Intent patterns**: Trigger vocali per domotica mesh
+- **Wakeword config**: Parole attivazione italiane consigliate
+- **Alert Push**: Server → Chatbot broadcast per emergenze
+- **alert_broadcaster.py**: Implementazione broadcast WebSocket
+- **Firmware ESP32**: Gestione ricezione alert con priorità
+- **Flusso completo alert**: Diagramma sensore → chatbot vocale
 
 ### v2.1 (Gennaio 2025)
 - **Ottimizzazione Energetica**: Deep sleep pattern per nodi a batteria (8-12 mesi autonomia)
@@ -1317,4 +2508,4 @@ mqtt:
 
 ---
 
-*Documento v2.1 - Aggiornato con ottimizzazione energetica, monitoring e gestione offline - Gennaio 2025*
+*Documento v2.2 - Completo con firmware, OS, integrazione Xiaozhi e sistema alert push - Gennaio 2025*
