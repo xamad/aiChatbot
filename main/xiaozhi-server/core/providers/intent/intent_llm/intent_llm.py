@@ -140,7 +140,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # NOTA: "modalità interprete" va a TRADUTTORE, "attiva modalità [profilo]" va qui
         # Escludiamo esplicitamente "interprete" dal match "attiva modalità" per evitare conflitti
         is_profile_request = match_any(['cambia profilo', 'attiva profilo', 'modalità assistente',
-                      'che profilo', 'quale profilo', 'quali profili', 'profili disponibili', 'lista profili', 'elenca profili'])
+                      'che profilo', 'quale profilo', 'quali profili', 'profili disponibili',
+                      'lista profili', 'elenca profili', 'elenco profili'])
         # "attiva modalità X" solo se X non è "interprete" (quello va a traduttore)
         if 'attiva modalità' in text_lower and 'interprete' not in text_lower:
             is_profile_request = True
@@ -392,13 +393,26 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['rubrica', 'numero di', 'telefono di', 'contatto']):
             return f'{{"function_call": {{"name": "rubrica_vocale", "arguments": {{"action": "search", "query": "{text}"}}}}}}'
 
+        # ============ AIUTO PROFILO (Help vocale interattivo) ============
+        # "aiuto", "help", "guida" -> mostra info profilo e comandi disponibili
+        if match_any(['aiuto', 'help', 'guida vocale', 'come funziona', 'come si usa',
+                      'istruzioni', 'quali comandi', 'cosa puoi fare per me']):
+            # Aiuto specifico per una funzione?
+            funzioni_aiuto = ['radio', 'meteo', 'timer', 'ricette', 'traduttore', 'quiz', 'barzelletta',
+                             'promemoria', 'nota', 'spesa', 'musica', 'domotica', 'meditazione']
+            for func in funzioni_aiuto:
+                if func in text_lower:
+                    return f'{{"function_call": {{"name": "aiuto_profilo", "arguments": {{"tipo": "funzione", "funzione": "{func}"}}}}}}'
+            # Aiuto generale
+            return '{"function_call": {"name": "aiuto_profilo", "arguments": {"tipo": "generale"}}}'
+
         # ============ SOMMARIO FUNZIONI ============
         # "cosa sai fare" va a CHI_SONO, qui solo richieste esplicite di elenco
         # Supporta richiesta per categoria specifica
         categorie_sommario = ['audio', 'media', 'giochi', 'informazioni', 'info', 'cucina', 'ricette',
                               'utilità', 'utility', 'traduzione', 'ricerca', 'benessere', 'casa', 'domotica',
                               'guide', 'bambini', 'famiglia', 'personalità']
-        if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'help', 'funzionalità disponibili',
+        if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'funzionalità disponibili',
                       'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con']):
             # Cerca se c'è una categoria specifica
             for cat in categorie_sommario:
