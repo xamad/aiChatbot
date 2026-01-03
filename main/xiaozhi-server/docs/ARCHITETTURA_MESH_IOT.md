@@ -3,7 +3,7 @@
 > Documento di architettura per l'integrazione di sensori ESP32, LoRa/Meshtastic e hub locale con il chatbot vocale Xiaozhi.
 
 **Data**: Gennaio 2025
-**Versione**: 2.0 (Aggiornato con feedback community)
+**Versione**: 2.1 (Deep sleep, monitoring, gestione offline)
 
 ---
 
@@ -32,7 +32,7 @@
 | **ESP32-WROOM** | N | Sensori indoor (ESP-NOW) | ESP-NOW |
 | **ESP32-WROOM** | N | Sensori outdoor (+ DX-LR-30) | LoRa |
 | **DX-LR-30** | 2 | Moduli LoRa per nodi outdoor | LoRa 868MHz |
-| **ESP32-CAM** | N | Telecamere | WiFi o ESP-NOW |
+| **ESP32-CAM** | N | Telecamere sicurezza | **Solo WiFi** (no ESP-NOW/LoRa) |
 | **LuckFox Pico** | 1 | Hub locale Linux | Ethernet/WiFi |
 | **Raspberry Pi Pico** | 1 | I2C hub sensori (opzionale) | UART → ESP32 |
 
@@ -438,9 +438,11 @@ sensor:
 
 - [ ] Più sensori indoor (ESPHome YAML con ESP-NOW)
 - [ ] Sensori outdoor LoRa (ESP32 + DX-LR-30)
-- [ ] ESP32-CAM
+- [ ] ESP32-CAM su WiFi dedicato (RTSP → NVR/Frigate)
 - [ ] Automazioni avanzate
 - [ ] Dashboard Grafana
+
+> **Nota ESP32-CAM**: Le telecamere richiedono banda elevata, incompatibile con ESP-NOW (250 byte max) o LoRa. Mantenerle su rete WiFi dedicata con RTSP stream verso NVR locale (es. Frigate, MotionEye).
 
 ---
 
@@ -633,6 +635,638 @@ sensor:
 
 ---
 
+## Ottimizzazione Energetica
+
+### Deep Sleep per Nodi Battery-Powered
+
+Il consumo in deep sleep su ESP32 può scendere a **10-30µA**, permettendo operatività per **mesi o anni** con batterie.
+
+**Calcolo autonomia**: Con batteria 18650 da 3000mAh e rilevazioni ogni 5 minuti → **8-12 mesi** di autonomia teorica.
+
+#### ESPHome Deep Sleep Pattern
+
+```yaml
+# sensore_outdoor.yaml - Nodo a batteria
+esphome:
+  name: serra_outdoor
+  on_boot:
+    priority: -100
+    then:
+      - wait_until:
+          condition:
+            mqtt.connected:
+      - delay: 5s
+      - deep_sleep.enter:
+
+deep_sleep:
+  run_duration: 20s          # Tempo massimo attivo
+  sleep_duration: 5min       # Intervallo letture
+  wakeup_pin: GPIO33         # Wake-up da interrupt (opzionale)
+  wakeup_pin_mode: KEEP_AWAKE
+
+sensor:
+  - platform: adc
+    pin: GPIO35
+    name: "Battery Voltage"
+    attenuation: 11db
+    filters:
+      - multiply: 2.0        # Voltage divider (R1=R2)
+    on_value_range:
+      - below: 3.3           # Allarme batteria scarica
+        then:
+          - mqtt.publish:
+              topic: "mesh/system/alerts"
+              payload: "BATT_LOW_serra"
+```
+
+### ⚠️ ESP-NOW e Deep Sleep - Pattern Critico
+
+**Problema**: ESP-NOW richiede che il **ricevitore (gateway) sia sempre attivo**.
+
+**Soluzione**:
+- Nodo si sveglia → Invia dato → Attende conferma → Torna in sleep (2-3 sec totali)
+- Gateway ESP32-S3 rimane **sempre attivo** (alimentato da rete)
+
+```cpp
+// Nodo sensore ESP-NOW - pattern ottimizzato
+#include <esp_now.h>
+#include <esp_sleep.h>
+
+volatile bool ackReceived = false;
+
+void OnDataSent(const uint8_t *mac, esp_now_send_status_t status) {
+    ackReceived = (status == ESP_NOW_SEND_SUCCESS);
+}
+
+void setup() {
+    // Configura wake-up timer (5 minuti)
+    esp_sleep_enable_timer_wakeup(5 * 60 * 1000000ULL);
+
+    // Init WiFi + ESP-NOW
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_send_cb(OnDataSent);
+
+    // Aggiungi peer (gateway)
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, gateway_mac, 6);
+    esp_now_add_peer(&peer);
+
+    // Leggi sensore
+    float temp = readTemperature();
+    float battery = readBattery();
+
+    // Prepara payload
+    SensorData data = {temp, battery, millis()};
+
+    // Invia via ESP-NOW
+    esp_now_send(gateway_mac, (uint8_t*)&data, sizeof(data));
+
+    // Attendi conferma (max 3 sec)
+    unsigned long start = millis();
+    while (!ackReceived && millis() - start < 3000) {
+        delay(10);
+    }
+
+    // Log errore se non confermato
+    if (!ackReceived) {
+        // Salva in RTC memory per retry
+        rtc_data.failed_sends++;
+    }
+
+    // DORMI - loop() non viene mai eseguito
+    esp_deep_sleep_start();
+}
+
+void loop() {
+    // Mai raggiunto
+}
+```
+
+---
+
+## Gestione Code Offline
+
+### Problema Critico
+
+**Scenario**: LuckFox perde connessione VPS per 2 ore. Accumula 1000+ messaggi MQTT. Riconnessione → **flood di messaggi**.
+
+### Soluzione: Buffer con Aggregazione
+
+```python
+# luckfox_queue_manager.py
+import sqlite3
+import json
+from datetime import datetime, timedelta
+
+class OfflineBuffer:
+    def __init__(self, db_path='mqtt_buffer.db', max_size=5000):
+        self.db = sqlite3.connect(db_path, check_same_thread=False)
+        self.max_size = max_size
+        self._init_db()
+
+    def _init_db(self):
+        """Crea tabelle se non esistono"""
+        self.db.executescript('''
+            CREATE TABLE IF NOT EXISTS sensor_buffer (
+                id INTEGER PRIMARY KEY,
+                topic TEXT,
+                value REAL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS event_buffer (
+                id INTEGER PRIMARY KEY,
+                topic TEXT,
+                payload TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_sensor_topic ON sensor_buffer(topic);
+        ''')
+
+    def add_message(self, topic, payload):
+        """Aggiungi a buffer quando offline"""
+        try:
+            data = json.loads(payload) if isinstance(payload, str) else payload
+
+            # Aggrega sensori (temperatura, umidità, etc.)
+            if any(x in topic for x in ['temperatura', 'umidita', 'gas', 'battery']):
+                value = data.get('value', data) if isinstance(data, dict) else data
+                self.db.execute(
+                    "INSERT INTO sensor_buffer (topic, value) VALUES (?, ?)",
+                    (topic, float(value))
+                )
+            else:
+                # Eventi non aggregabili (alert, comandi)
+                self.db.execute(
+                    "INSERT INTO event_buffer (topic, payload) VALUES (?, ?)",
+                    (topic, json.dumps(data))
+                )
+            self.db.commit()
+            self._cleanup_old()
+        except Exception as e:
+            print(f"Buffer error: {e}")
+
+    def _cleanup_old(self):
+        """Rimuovi dati vecchi > 24h o se troppi"""
+        self.db.execute(
+            "DELETE FROM sensor_buffer WHERE timestamp < datetime('now', '-24 hours')"
+        )
+        # Mantieni solo ultimi max_size
+        self.db.execute(f'''
+            DELETE FROM sensor_buffer WHERE id NOT IN (
+                SELECT id FROM sensor_buffer ORDER BY timestamp DESC LIMIT {self.max_size}
+            )
+        ''')
+        self.db.commit()
+
+    def sync_to_vps(self, mqtt_client):
+        """Sync intelligente quando torna online"""
+        # 1. Invia aggregati sensori (media per topic)
+        cursor = self.db.execute('''
+            SELECT topic,
+                   AVG(value) as avg_val,
+                   MIN(value) as min_val,
+                   MAX(value) as max_val,
+                   COUNT(*) as samples,
+                   MIN(timestamp) as first_ts,
+                   MAX(timestamp) as last_ts
+            FROM sensor_buffer
+            GROUP BY topic
+        ''')
+
+        for row in cursor:
+            topic, avg_val, min_val, max_val, samples, first_ts, last_ts = row
+            payload = {
+                "type": "aggregated",
+                "avg": round(avg_val, 2),
+                "min": round(min_val, 2),
+                "max": round(max_val, 2),
+                "samples": samples,
+                "period": {"from": first_ts, "to": last_ts}
+            }
+            mqtt_client.publish(f"mesh/sync/local_to_vps/{topic}", json.dumps(payload))
+
+        # 2. Invia eventi critici (non aggregati)
+        events = self.db.execute(
+            "SELECT topic, payload, timestamp FROM event_buffer ORDER BY timestamp"
+        ).fetchall()
+
+        for topic, payload, ts in events:
+            mqtt_client.publish(topic, payload)
+
+        # 3. Pulisci buffer dopo sync
+        self.db.execute("DELETE FROM sensor_buffer")
+        self.db.execute("DELETE FROM event_buffer")
+        self.db.commit()
+
+        return len(events)
+
+# Uso nel main loop
+buffer = OfflineBuffer()
+
+def on_message(client, userdata, msg):
+    if not is_vps_connected():
+        buffer.add_message(msg.topic, msg.payload)
+    else:
+        # Forward normale al VPS
+        vps_client.publish(msg.topic, msg.payload)
+
+def on_vps_reconnect():
+    """Chiamato quando VPS torna online"""
+    synced = buffer.sync_to_vps(vps_client)
+    print(f"Synced {synced} buffered events to VPS")
+```
+
+---
+
+## Monitoring e Alerting
+
+### Heartbeat System
+
+```
+# Topics heartbeat - ogni dispositivo pubblica ogni 60 sec
+mesh/system/heartbeat/{dispositivo}
+  Payload: {
+    "uptime": 3600,
+    "rssi": -65,
+    "free_heap": 45000,
+    "battery": 3.7,        # Solo per nodi a batteria
+    "wifi_channel": 1,
+    "version": "1.0.2"
+  }
+```
+
+### Watchdog su LuckFox
+
+```python
+# luckfox_watchdog.py
+import time
+import json
+from datetime import datetime, timedelta
+from threading import Thread
+
+class DeviceWatchdog:
+    def __init__(self, mqtt_client, alert_callback):
+        self.devices = {}  # {device_id: last_seen_datetime}
+        self.timeouts = {
+            "gateway": timedelta(minutes=2),     # Gateway sempre attivo
+            "sensor_indoor": timedelta(minutes=10),  # Sensori indoor
+            "sensor_outdoor": timedelta(minutes=15), # Outdoor (deep sleep)
+            "heltec": timedelta(minutes=5),      # Bridge LoRa
+        }
+        self.mqtt = mqtt_client
+        self.alert = alert_callback
+        self.running = True
+
+    def on_heartbeat(self, topic, payload):
+        """Callback per messaggi heartbeat"""
+        device = topic.split('/')[-1]
+        data = json.loads(payload)
+
+        self.devices[device] = {
+            "last_seen": datetime.now(),
+            "data": data
+        }
+
+        # Check batteria scarica
+        if data.get("battery", 4.2) < 3.3:
+            self.alert(f"BATT_LOW: {device} @ {data['battery']}V")
+
+        # Check heap basso (memory leak?)
+        if data.get("free_heap", 100000) < 20000:
+            self.alert(f"LOW_HEAP: {device} @ {data['free_heap']} bytes")
+
+    def check_devices(self):
+        """Controlla dispositivi offline - chiamare ogni 60 sec"""
+        now = datetime.now()
+        offline = []
+
+        for device, info in self.devices.items():
+            last_seen = info["last_seen"]
+            device_type = self._get_device_type(device)
+            timeout = self.timeouts.get(device_type, timedelta(minutes=10))
+
+            if now - last_seen > timeout:
+                offline.append(device)
+
+        for device in offline:
+            self.alert(f"OFFLINE: {device} (last seen: {self.devices[device]['last_seen']})")
+            # Invia alert LoRa per dispositivi critici
+            if "gateway" in device:
+                self.send_lora_emergency(f"Gateway {device} OFFLINE!")
+
+    def _get_device_type(self, device_name):
+        if "gateway" in device_name.lower():
+            return "gateway"
+        if "outdoor" in device_name.lower() or "serra" in device_name.lower():
+            return "sensor_outdoor"
+        if "heltec" in device_name.lower() or "lora" in device_name.lower():
+            return "heltec"
+        return "sensor_indoor"
+
+    def send_lora_emergency(self, message):
+        """Invia alert via LoRa/Meshtastic"""
+        self.mqtt.publish("meshtastic/tx", json.dumps({
+            "to": "broadcast",
+            "text": f"🚨 {message}",
+            "priority": "high"
+        }))
+
+    def run(self):
+        """Thread watchdog"""
+        while self.running:
+            self.check_devices()
+            time.sleep(60)
+
+    def start(self):
+        Thread(target=self.run, daemon=True).start()
+
+# Uso
+def send_alert(msg):
+    print(f"[ALERT] {msg}")
+    # Invia push notification, email, etc.
+
+watchdog = DeviceWatchdog(mqtt_client, send_alert)
+watchdog.start()
+
+# Subscribe a heartbeat
+mqtt_client.subscribe("mesh/system/heartbeat/#")
+mqtt_client.message_callback_add("mesh/system/heartbeat/#", watchdog.on_heartbeat)
+```
+
+### ESPHome Heartbeat Config
+
+```yaml
+# Aggiungi a ogni dispositivo ESPHome
+interval:
+  - interval: 60s
+    then:
+      - mqtt.publish:
+          topic: !lambda |-
+            return "mesh/system/heartbeat/" + App.get_name();
+          payload: !lambda |-
+            char buf[200];
+            snprintf(buf, sizeof(buf),
+              "{\"uptime\":%d,\"rssi\":%d,\"free_heap\":%d,\"version\":\"%s\"}",
+              millis()/1000,
+              WiFi.RSSI(),
+              ESP.getFreeHeap(),
+              App.get_compilation_time().c_str()
+            );
+            return std::string(buf);
+```
+
+---
+
+## Dashboard Minimale LuckFox
+
+Webserver Flask ultra-leggero per status locale (funziona **senza internet**):
+
+```python
+# luckfox_dashboard.py
+from flask import Flask, jsonify, render_template_string
+import sqlite3
+import json
+import subprocess
+
+app = Flask(__name__)
+
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🦊 LuckFox Status</title>
+    <meta http-equiv="refresh" content="30">
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+        .card { background: #16213e; padding: 15px; margin: 10px 0; border-radius: 8px; }
+        .online { color: #4ade80; }
+        .offline { color: #f87171; }
+        .warning { color: #fbbf24; }
+        h1 { color: #818cf8; }
+        table { width: 100%; border-collapse: collapse; }
+        td, th { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
+    </style>
+</head>
+<body>
+    <h1>🦊 LuckFox Pico - Hub Status</h1>
+
+    <div class="card">
+        <h3>🌐 Connettività</h3>
+        <p>Internet: <span class="{{ 'online' if status.internet else 'offline' }}">
+            {{ '✅ Online' if status.internet else '❌ Offline' }}</span></p>
+        <p>VPS MQTT: <span class="{{ 'online' if status.vps_mqtt else 'offline' }}">
+            {{ '✅ Connected' if status.vps_mqtt else '❌ Disconnected' }}</span></p>
+        <p>Messaggi in buffer: {{ status.buffered_messages }}</p>
+    </div>
+
+    <div class="card">
+        <h3>📡 Dispositivi ({{ devices|length }})</h3>
+        <table>
+            <tr><th>Device</th><th>Ultimo contatto</th><th>RSSI</th><th>Batteria</th></tr>
+            {% for d in devices %}
+            <tr>
+                <td>{{ d.name }}</td>
+                <td class="{{ 'online' if d.online else 'warning' }}">{{ d.last_seen }}</td>
+                <td>{{ d.rssi }} dBm</td>
+                <td>{{ d.battery if d.battery else 'N/A' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>🌡️ Ultime Letture</h3>
+        <table>
+            <tr><th>Sensore</th><th>Valore</th><th>Timestamp</th></tr>
+            {% for r in readings %}
+            <tr>
+                <td>{{ r.device }}</td>
+                <td>{{ r.value }}</td>
+                <td>{{ r.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <p style="color:#666;font-size:12px;">Auto-refresh ogni 30 sec |
+       Uptime: {{ status.uptime }}</p>
+</body>
+</html>
+'''
+
+def is_internet_up():
+    """Check connettività internet"""
+    try:
+        subprocess.check_call(
+            ['ping', '-c', '1', '-W', '2', '8.8.8.8'],
+            stdout=subprocess.DEVNULL
+        )
+        return True
+    except:
+        return False
+
+def get_system_status():
+    """Raccoglie status sistema"""
+    db = sqlite3.connect('sensors.db')
+
+    buffered = db.execute(
+        "SELECT COUNT(*) FROM sensor_buffer"
+    ).fetchone()[0]
+
+    # Uptime sistema
+    with open('/proc/uptime') as f:
+        uptime_sec = int(float(f.read().split()[0]))
+        hours, rem = divmod(uptime_sec, 3600)
+        mins, secs = divmod(rem, 60)
+        uptime = f"{hours}h {mins}m"
+
+    return {
+        "internet": is_internet_up(),
+        "vps_mqtt": mqtt_connected,  # Variabile globale
+        "buffered_messages": buffered,
+        "uptime": uptime
+    }
+
+def get_devices():
+    """Lista dispositivi dal watchdog"""
+    devices = []
+    for name, info in watchdog.devices.items():
+        devices.append({
+            "name": name,
+            "last_seen": info["last_seen"].strftime("%H:%M:%S"),
+            "online": (datetime.now() - info["last_seen"]).seconds < 300,
+            "rssi": info["data"].get("rssi", "N/A"),
+            "battery": info["data"].get("battery")
+        })
+    return devices
+
+def get_latest_readings(limit=10):
+    """Ultime letture sensori"""
+    db = sqlite3.connect('sensors.db')
+    rows = db.execute('''
+        SELECT device, temperature, humidity, timestamp
+        FROM sensors ORDER BY timestamp DESC LIMIT ?
+    ''', (limit,)).fetchall()
+
+    return [{
+        "device": r[0],
+        "value": f"{r[1]}°C / {r[2]}%",
+        "timestamp": r[3]
+    } for r in rows]
+
+@app.route('/')
+def dashboard():
+    """Dashboard HTML"""
+    return render_template_string(HTML_TEMPLATE,
+        status=get_system_status(),
+        devices=get_devices(),
+        readings=get_latest_readings()
+    )
+
+@app.route('/api/status')
+def api_status():
+    """API REST per status sistema"""
+    return jsonify({
+        "status": get_system_status(),
+        "devices": get_devices(),
+        "readings": get_latest_readings(20)
+    })
+
+@app.route('/api/devices')
+def api_devices():
+    """API REST lista dispositivi"""
+    return jsonify(get_devices())
+
+if __name__ == '__main__':
+    # Accessibile da rete locale anche senza internet
+    app.run(host='0.0.0.0', port=5000, debug=False)
+```
+
+**Accesso**: `http://luckfox.local:5000` o `http://192.168.1.100:5000`
+
+### Systemd Service per Dashboard
+
+```bash
+# /etc/systemd/system/luckfox-dashboard.service
+[Unit]
+Description=LuckFox IoT Dashboard
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/iot
+ExecStart=/usr/bin/python3 luckfox_dashboard.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Abilitazione
+systemctl enable luckfox-dashboard
+systemctl start luckfox-dashboard
+```
+
+---
+
+## Meshtastic Security - Generazione PSK
+
+```bash
+# 1. Genera PSK casuale (32 bytes base64)
+meshtastic --set-default-channel
+meshtastic --ch-set psk random --ch-index 0
+
+# 2. Configura regione EU
+meshtastic --set lora.region EU_868
+
+# 3. Visualizza PSK per condividerlo
+meshtastic --ch-get --ch-index 0
+
+# Output esempio:
+# Channel 0:
+#   PSK: base64:YWJjZGVmZ2hpamtsbW5vcA==
+#   Name: LongFast
+
+# 4. Applica stesso PSK su tutti i nodi Meshtastic
+meshtastic --ch-set psk base64:YWJjZGVmZ2hpamtsbW5vcA== --ch-index 0
+```
+
+### Meshtastic Config Completa
+
+```yaml
+# Configurazione sicura Heltec V3
+device:
+  role: ROUTER           # Relay messaggi
+  serial_enabled: true   # Debug via USB
+
+lora:
+  region: EU_868
+  hop_limit: 3           # Max hop per mesh
+  tx_power: 20           # dBm (max EU)
+
+channel:
+  - index: 0
+    name: "IoTHome"
+    psk: "base64:YOUR_RANDOM_PSK_HERE"
+    uplink_enabled: true
+    downlink_enabled: true
+
+mqtt:
+  enabled: true
+  address: mqtts://vps.example.com:8883
+  username: meshtastic
+  password: "****"
+  encryption_enabled: true
+  json_enabled: true
+  tls_enabled: true      # IMPORTANTE!
+```
+
+---
+
 ## Riferimenti
 
 ### Progetti Principali
@@ -657,6 +1291,15 @@ sensor:
 
 ## Changelog
 
+### v2.1 (Gennaio 2025)
+- **Ottimizzazione Energetica**: Deep sleep pattern per nodi a batteria (8-12 mesi autonomia)
+- **ESP-NOW + Deep Sleep**: Pattern critico con callback conferma
+- **Gestione Code Offline**: Buffer SQLite con aggregazione intelligente
+- **Monitoring/Heartbeat**: Watchdog system con alert LoRa
+- **Dashboard LuckFox**: Web UI Flask locale (funziona offline)
+- **Meshtastic Security**: Guida generazione PSK custom
+- **ESP32-CAM**: Chiarito che resta su WiFi (no ESP-NOW/LoRa per video)
+
 ### v2.0 (Gennaio 2025)
 - Aggiunto zh_gateway come alternativa preferita (ESP-IDF)
 - ESPHome 2025.8+ supporto ESP-NOW nativo
@@ -674,4 +1317,4 @@ sensor:
 
 ---
 
-*Documento aggiornato con feedback community e nuove release progetti open source - Gennaio 2025*
+*Documento v2.1 - Aggiornato con ottimizzazione energetica, monitoring e gestione offline - Gennaio 2025*
