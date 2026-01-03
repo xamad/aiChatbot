@@ -3,7 +3,7 @@
 > Documento di architettura per l'integrazione di sensori ESP32, LoRa/Meshtastic e hub locale con il chatbot vocale Xiaozhi.
 
 **Data**: Gennaio 2025
-**Versione**: 1.0
+**Versione**: 2.0 (Aggiornato con feedback community)
 
 ---
 
@@ -15,9 +15,10 @@
 4. [Architettura Resiliente (VPS + Hub Locale)](#architettura-resiliente)
 5. [Progetti Open Source da Riusare](#progetti-open-source)
 6. [Piano di Sviluppo in Fasi](#piano-di-sviluppo)
-7. [Critiche e Miglioramenti](#critiche-e-miglioramenti)
-8. [Struttura MQTT Topics](#struttura-mqtt-topics)
-9. [Configurazioni Hardware](#configurazioni-hardware)
+7. [Sicurezza](#sicurezza)
+8. [Critiche e Miglioramenti](#critiche-e-miglioramenti)
+9. [Struttura MQTT Topics](#struttura-mqtt-topics)
+10. [Configurazioni Hardware](#configurazioni-hardware)
 
 ---
 
@@ -26,7 +27,7 @@
 | Dispositivo | Quantità | Ruolo Assegnato | Connettività |
 |-------------|----------|-----------------|--------------|
 | **ESP32-C3 Mini** | 1 | Chatbot AI (già funzionante) | WiFi → VPS |
-| **ESP32-S3** | 1 | Gateway ESP-NOW (master indoor) | WiFi + ESP-NOW |
+| **ESP32-S3** | 1 | Gateway ESP-NOW (master indoor) | Ethernet + ESP-NOW |
 | **Heltec V3** | 1 | Bridge LoRa + Meshtastic | WiFi + LoRa SX1262 |
 | **ESP32-WROOM** | N | Sensori indoor (ESP-NOW) | ESP-NOW |
 | **ESP32-WROOM** | N | Sensori outdoor (+ DX-LR-30) | LoRa |
@@ -35,14 +36,16 @@
 | **LuckFox Pico** | 1 | Hub locale Linux | Ethernet/WiFi |
 | **Raspberry Pi Pico** | 1 | I2C hub sensori (opzionale) | UART → ESP32 |
 
-### LuckFox Pico Specs
+### LuckFox Pico Specs e Raccomandazioni
 
-| Modello | CPU | RAM | NPU | Extra |
-|---------|-----|-----|-----|-------|
-| Pico Pro | Cortex-A7 1.2GHz | 128MB | 0.5 TOPS | Ethernet |
-| Pico Ultra | Cortex-A7 1.2GHz | 256MB | 1 TOPS | Ethernet |
+| Modello | CPU | RAM | NPU | Uso Consigliato |
+|---------|-----|-----|-----|-----------------|
+| Pico Pro | Cortex-A7 1.2GHz | 128MB | 0.5 TOPS | Mosquitto + automazioni + cache |
+| Pico Ultra | Cortex-A7 1.2GHz | 256MB | 1 TOPS | **Preferito** se computer vision o AI locale |
 
-**Può eseguire**: Mosquitto, Python, SQLite, Piper TTS
+**Può eseguire**: Mosquitto, NanoMQ (alternativa ultra-leggera), Python, SQLite, Piper TTS
+
+> **Test confermati dalla community**: LuckFox Pico Ultra W gestisce efficacemente traffico MQTT real-time su reti IoT domestiche.
 
 ---
 
@@ -58,7 +61,7 @@
                          │  • Database storico             │
                          └───────────────┬─────────────────┘
                                          │
-                                         │ MQTT Bridge / REST API
+                                         │ MQTT Bridge TLS + Auth
                                          │ (sync bidirezionale)
                                          │
     ═══════════════════════════════════════════════════════════════
@@ -71,7 +74,7 @@
                          ┌───────────────▼───────────────────┐
                          │   🦊 LUCKFOX PICO (Hub Locale)    │
                          │                                   │
-                         │   • Mosquitto MQTT Broker         │
+                         │   • Mosquitto MQTT Broker (auth)  │
                          │   • Automazioni critiche Python   │
                          │   • Cache SQLite                  │
                          │   • Piper TTS (offline)           │
@@ -80,15 +83,15 @@
                                          │
                     ┌────────────────────┼────────────────────┐
                     │                    │                    │
-              UART/USB             UART/USB             UART/USB
+              ETHERNET            UART/USB             UART/USB
                     │                    │                    │
                     ▼                    ▼                    ▼
          ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
          │ 🎤 ESP32-C3      │  │ 🌐 ESP32-S3      │  │ 📡 HELTEC V3     │
          │    CHATBOT       │  │    GATEWAY       │  │    LoRa BRIDGE   │
          │                  │  │    ESP-NOW       │  │                  │
-         │ • Online → VPS   │  │ • Master mesh    │  │ • LoRa SX1262    │
-         │ • Offline → Pico │  │ • Automazioni FW │  │ • Meshtastic     │
+         │ • Online → VPS   │  │ • zh_gateway     │  │ • LoRa SX1262    │
+         │ • Offline → Pico │  │ • LAN mode (ETH) │  │ • Meshtastic     │
          └──────────────────┘  └────────┬─────────┘  └────────┬─────────┘
                                         │                     │
                                         │ ESP-NOW             │ LoRa 868MHz
@@ -98,8 +101,8 @@
               │                         │                     │                │
               ▼              ▼          │          ▼          ▼          ▼     │
          ┌────────┐    ┌────────┐       │    ┌────────┐  ┌────────┐ ┌────────┐
-         │ WROOM  │    │ WROOM  │       │    │WROOM+  │  │WROOM+  │ │MESH    │
-         │        │    │        │       │    │DX-LR-30│  │DX-LR-30│ │NODES   │
+         │ESPHome │    │ESPHome │       │    │WROOM+  │  │WROOM+  │ │MESH    │
+         │2025.8+ │    │2025.8+ │       │    │DX-LR-30│  │DX-LR-30│ │NODES   │
          │ Cucina │    │Soggiorn│       │    │        │  │        │ │        │
          │ DHT22  │    │ mmWave │       │    │ Serra  │  │ Garage │ │📱Phone │
          │ MQ-2   │    │ CO2    │       │    │ Solare │  │        │ │🏢Office│
@@ -126,8 +129,22 @@
 
 **Quando usare Star vs Mesh:**
 - **Star** (consigliato): Appartamento <100mq, più affidabile
-- **Mesh**: Casa >150mq, multi-piano (ma painlessMesh è instabile)
-- **Alternativa mesh**: Aggiungere repeater ESP32
+- **Mesh**: Casa >150mq, multi-piano
+  - **ZHNetwork** (consigliato): Più stabile di painlessMesh secondo community MySensors
+  - **ESPHome 2025.8+**: Supporto nativo ESP-NOW mesh via YAML!
+
+### ⚠️ CRITICO: WiFi Channel Lock
+
+Se il gateway ESP32-S3 usa **WiFi + ESP-NOW simultaneamente**:
+- Il router WiFi **DEVE** essere sullo stesso canale di ESP-NOW (solitamente canale 1)
+- **Soluzione raccomandata**: Usa modalità **ESP_NOW_LAN** (Ethernet) invece di WiFi
+
+```
+MODALITÀ GATEWAY DISPONIBILI (zh_gateway):
+├── ESP_NOW      → Solo nodo ESP-NOW (no internet)
+├── ESP_NOW_WIFI → Gateway via WiFi (vincolo canale!)
+└── ESP_NOW_LAN  → Gateway via Ethernet (PREFERITA ✅)
+```
 
 ### LoRa (Outdoor)
 
@@ -140,7 +157,21 @@
 | Bandwidth | 125 kHz |
 | Consumo | ~120mA TX, ~10µA deep sleep |
 
-### MQTT Topics
+### ⚠️ Meshtastic MQTT: Policy "Zero-Hop" (Luglio 2024)
+
+Il server pubblico Meshtastic ha implementato una policy **zero-hop** per ridurre il traffico:
+- Con PSK di default, i messaggi MQTT **NON** popoleranno la mesh locale
+- **Soluzione**: Configura un **PSK personalizzato** per pieno controllo
+
+```yaml
+# meshtastic config
+lora:
+  psk: "LA_TUA_CHIAVE_PERSONALIZZATA_BASE64"  # NON usare default!
+```
+
+---
+
+## Struttura MQTT Topics
 
 ```
 mesh/
@@ -164,6 +195,15 @@ mesh/
 ├── meshtastic/
 │   ├── tx                   → {"to": "broadcast", "text": "..."}
 │   └── rx
+├── sync/                    ← NUOVO: Sincronizzazione VPS ↔ LuckFox
+│   ├── vps_to_local/
+│   │   ├── automations_update    → Aggiornamenti regole automazione
+│   │   ├── config_update         → Nuove configurazioni
+│   │   └── commands_queue        → Comandi in coda quando offline
+│   └── local_to_vps/
+│       ├── events_buffer         → Eventi bufferizzati durante offline
+│       ├── offline_logs          → Log periodo disconnesso
+│       └── heartbeat             → Keep-alive locale
 └── system/
     ├── alerts
     └── heartbeat
@@ -246,26 +286,74 @@ SCENARIO: Internet cade + Rilevato gas
 
 ## Progetti Open Source
 
-### Da Riusare (NON reinventare la ruota!)
+### Aggiornamenti Importanti (Gennaio 2025)
+
+#### ESP-NOW Gateway - Evoluzione
+
+| Progetto | Framework | Caratteristiche | Raccomandazione |
+|----------|-----------|-----------------|-----------------|
+| **ESP-NOW-Gateway** | Arduino | v1.42, bug fix restart/update, 3 modalità | Buono per iniziare |
+| **zh_gateway** | ESP-IDF | Mesh + diretta, OTA remoto, NTP, Syslog | **PREFERITO per produzione** |
+
+```
+zh_gateway vantaggi:
+├── OTA firmware update via ESP-NOW per dispositivi remoti!
+├── Sincronizzazione NTP integrata
+├── Supporto Syslog per debugging distribuito
+└── Maggiore stabilità su ESP32-S3
+```
+
+#### ESPHome 2025.8.0 - ESP-NOW Nativo!
+
+**NOVITÀ**: ESPHome ha introdotto il supporto nativo per **ESP-NOW mesh communication**.
+
+```yaml
+# cucina.yaml - ESPHome 2025.8+
+esphome:
+  name: cucina
+
+esp32:
+  board: esp32dev
+
+# NUOVO! ESP-NOW nativo senza codice custom
+esp_now:
+  peers:
+    - mac_address: "AA:BB:CC:DD:EE:FF"  # Gateway
+
+sensor:
+  - platform: dht
+    pin: GPIO4
+    temperature:
+      name: "Cucina Temperatura"
+      on_value:
+        - esp_now.send:
+            mac_address: "AA:BB:CC:DD:EE:FF"
+            data: !lambda 'return id(temp).state;'
+```
+
+### Tabella Progetti Aggiornata
 
 | Componente | Progetto | URL | Note |
 |------------|----------|-----|------|
-| Gateway ESP-NOW | ESP-NOW-Gateway | https://github.com/aZholtikov/ESP-NOW-Gateway | Auto-discovery HA |
+| Gateway ESP-NOW | **zh_gateway** | https://github.com/aZholtikov/zh_gateway | **ESP-IDF, OTA, preferito** |
+| Gateway Arduino | ESP-NOW-Gateway | https://github.com/aZholtikov/ESP-NOW-Gateway | v1.42, più semplice |
+| Mesh Library | **ZHNetwork** | https://github.com/aZholtikov/ZHNetwork | Più stabile di painlessMesh |
+| Sensori indoor | **ESPHome 2025.8+** | https://esphome.io/ | **ESP-NOW nativo!** |
 | Multi-protocollo | OpenMQTTGateway | https://github.com/1technophile/OpenMQTTGateway | LoRa, BLE, 433MHz |
-| Sensori indoor | ESPHome | https://esphome.io/ | Config YAML, no codice |
-| LoRa Bridge | Meshtastic stock | https://meshtastic.org/ | Firmware già pronto |
+| LoRa Bridge | Meshtastic stock | https://meshtastic.org/ | Config PSK custom! |
 | Meshtastic Python | meshtastic-bridge | https://github.com/geoffwhittington/meshtastic-bridge | Bridge MQTT |
 | MQTT Broker | Mosquitto | https://mosquitto.org/ | Standard |
+| MQTT Leggero | **NanoMQ** | https://nanomq.io/ | Alternativa ultra-leggera |
 | TTS Offline | Piper TTS | https://github.com/rhasspy/piper | Leggero, italiano |
 | DB Time-series | InfluxDB | https://www.influxdata.com/ | Per storico |
 | Dashboard | Grafana | https://grafana.com/ | Visualizzazione |
 
-### Stima Codice Custom vs Riuso
+### Stima Codice Custom vs Riuso (Aggiornata)
 
 | Componente | Scrivi | Riusa |
 |------------|--------|-------|
-| Gateway ESP-NOW | 10% | 90% |
-| Nodi sensori indoor | 0% | 100% (ESPHome) |
+| Gateway ESP-NOW | 5% | 95% (zh_gateway) |
+| Nodi sensori indoor | **0%** | **100% (ESPHome 2025.8+)** |
 | Bridge LoRa | 0% | 100% (Meshtastic) |
 | MQTT Broker | 0% | 100% |
 | TTS locale | 0% | 100% |
@@ -273,63 +361,82 @@ SCENARIO: Internet cade + Rilevato gas
 | Automazioni | 80% | 20% |
 | Sync VPS↔locale | 60% | 40% |
 
-**Totale: ~30% custom, ~70% integrazione**
+**Totale: ~25% custom, ~75% integrazione** (migliorato con ESPHome ESP-NOW)
 
 ---
 
 ## Piano di Sviluppo
 
-### Fase 1: Minimo Funzionante (1-2 settimane)
+### Fase 1: Minimo Funzionante
 
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│ ESP32-WROOM │      │ ESP32-S3    │      │ VPS Hetzner │
-│ (1 sensore) │─────►│ Gateway     │─────►│ Mosquitto   │
-│ DHT22       │ESPNOW│ (fork repo) │ MQTT │ + Xiaozhi   │
+│ ESPHome     │      │ ESP32-S3    │      │ VPS Hetzner │
+│ (1 sensore) │─────►│ zh_gateway  │─────►│ Mosquitto   │
+│ DHT22       │ESPNOW│ (LAN mode)  │ MQTT │ + Xiaozhi   │
 └─────────────┘      └─────────────┘      └─────────────┘
 ```
 
 **Azioni:**
-- [ ] Fork/config ESP-NOW-Gateway
-- [ ] Installare Mosquitto su VPS
+- [ ] Scegliere gateway: zh_gateway (ESP-IDF) vs ESPHome 2025.8+ puro
+- [ ] Configurare ESP32-S3 in modalità **ESP_NOW_LAN** (Ethernet)
+- [ ] Installare Mosquitto su VPS con TLS
 - [ ] Plugin Xiaozhi minimale per MQTT
-- [ ] Test con 1 sensore
+- [ ] Test: quanti nodi ESP-NOW simultanei gestisce l'ESP32-S3?
 
-### Fase 2: Meshtastic (1 settimana)
+### Fase 1.5: Test Resilienza (NUOVO!)
+
+**Prima di espandere, validare il failover:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    TEST RESILIENZA                       │
+├─────────────────────────────────────────────────────────┤
+│ □ Simula caduta internet (stacca ethernet dal LuckFox)  │
+│ □ Verifica automazioni critiche continuano              │
+│ □ Conferma Piper TTS risponde senza latenza             │
+│ □ Testa alert LoRa → Meshtastic su telefono             │
+│ □ Verifica sync eventi quando internet torna            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Fase 2: Meshtastic
 
 ```
 ┌─────────────┐      ┌─────────────┐
 │ Heltec V3   │─────►│ VPS         │
 │ Meshtastic  │ MQTT │ Xiaozhi     │
-│ (stock FW)  │      │             │
+│ (PSK custom)│      │             │
 └─────────────┘      └─────────────┘
 ```
 
 **Azioni:**
 - [ ] Flash Meshtastic su Heltec V3
+- [ ] Configurare **PSK personalizzato** (NON default!)
 - [ ] Configurare MQTT gateway in Meshtastic
 - [ ] Plugin Xiaozhi per messaggi mesh
 
-### Fase 3: Hub Locale (1 settimana)
+### Fase 3: Hub Locale + Sicurezza
 
 ```
 ┌─────────────┐
 │ LuckFox     │◄───── Gateway + Heltec
 │ Mosquitto   │
-│ Automazioni │─────► VPS (sync)
+│ Automazioni │─────► VPS (sync TLS)
 │ Piper TTS   │
 └─────────────┘
 ```
 
 **Azioni:**
 - [ ] Setup LuckFox con Linux
-- [ ] Installare Mosquitto, Piper TTS
+- [ ] Installare Mosquitto con **autenticazione** (file passwd)
+- [ ] Abilitare **TLS/SSL** per connessione VPS ↔ LuckFox
 - [ ] Script automazioni Python
 - [ ] MQTT bridge verso VPS
 
 ### Fase 4: Espansione (iterativo)
 
-- [ ] Più sensori indoor (ESPHome YAML)
+- [ ] Più sensori indoor (ESPHome YAML con ESP-NOW)
 - [ ] Sensori outdoor LoRa (ESP32 + DX-LR-30)
 - [ ] ESP32-CAM
 - [ ] Automazioni avanzate
@@ -337,54 +444,105 @@ SCENARIO: Internet cade + Rilevato gas
 
 ---
 
+## Sicurezza
+
+### Checklist Sicurezza (OBBLIGATORIA)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    SICUREZZA MQTT                        │
+├─────────────────────────────────────────────────────────┤
+│ □ Mosquitto con autenticazione (file passwd)            │
+│ □ TLS/SSL per connessione VPS ↔ LuckFox                 │
+│ □ Firewall VPS: porta MQTT solo da IP LuckFox           │
+├─────────────────────────────────────────────────────────┤
+│                    SICUREZZA ESP-NOW                     │
+├─────────────────────────────────────────────────────────┤
+│ □ Encryption key univoca (NON default!)                 │
+│ □ Lista MAC address autorizzati                         │
+├─────────────────────────────────────────────────────────┤
+│                    SICUREZZA MESHTASTIC                  │
+├─────────────────────────────────────────────────────────┤
+│ □ PSK personalizzato (NON default!)                     │
+│ □ Encryption MQTT abilitata                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Configurazione Mosquitto Sicura
+
+```bash
+# /etc/mosquitto/mosquitto.conf sul LuckFox
+
+listener 1883 localhost
+listener 8883
+certfile /etc/mosquitto/certs/server.crt
+keyfile /etc/mosquitto/certs/server.key
+cafile /etc/mosquitto/certs/ca.crt
+
+password_file /etc/mosquitto/passwd
+allow_anonymous false
+```
+
+### ESP-NOW Encryption
+
+```cpp
+// zh_gateway o firmware custom
+uint8_t esp_now_key[16] = {
+    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88
+};
+esp_now_set_pmk(esp_now_key);
+```
+
+---
+
 ## Critiche e Miglioramenti
 
-### Problemi Identificati
+### Problemi Identificati e Soluzioni
 
-1. **Troppa complessità iniziale**
-   - Soluzione: Sviluppo in fasi incrementali
-
-2. **Reinventare la ruota**
-   - Soluzione: Usare progetti esistenti (ESP-NOW-Gateway, ESPHome, Meshtastic)
-
-3. **Manca piano di fallback**
-   - Soluzione: Test standalone di ogni componente prima di integrare
-
-4. **Sicurezza non considerata**
-   - Soluzione: MQTT con TLS + auth, ESP-NOW encryption, firewall VPS
-
-5. **Monitoring assente**
-   - Soluzione: Heartbeat, alert, dashboard Grafana
+| Problema | Soluzione |
+|----------|-----------|
+| Troppa complessità iniziale | Sviluppo in fasi + Fase 1.5 resilienza |
+| Reinventare la ruota | ESPHome 2025.8+, zh_gateway |
+| Manca piano di fallback | Test standalone ogni componente |
+| Sicurezza non considerata | Checklist sicurezza obbligatoria |
+| Monitoring assente | Heartbeat, alert, Grafana |
+| WiFi channel conflict | Usa ESP_NOW_LAN (Ethernet) |
+| Meshtastic zero-hop | PSK personalizzato |
 
 ### Test Standalone Consigliati
 
 ```
-Test 1: ESP-NOW-Gateway → MQTT broker locale → mosquitto_sub
+Test 1: zh_gateway → MQTT broker locale → mosquitto_sub
         (senza Xiaozhi, senza VPS)
 
 Test 2: Heltec V3 → Meshtastic app su telefono
-        (senza MQTT, senza server)
+        (senza MQTT, senza server, PSK custom)
 
 Test 3: LuckFox → MQTT → Node-RED (visualizza dati)
         (prima di scrivere Python custom)
+
+Test 4: Failover completo (stacca internet, verifica automazioni)
 ```
 
 ---
 
 ## Configurazioni Hardware
 
-### ESP32-S3 Gateway
+### ESP32-S3 Gateway (zh_gateway - PREFERITO)
 
 ```yaml
-# platformio.ini
-[env:esp32-s3]
-platform = espressif32
-board = esp32-s3-devkitc-1
-framework = arduino
-lib_deps =
-    ESP-NOW-Gateway  # fork da aZholtikov
-    PubSubClient
-    ArduinoJson
+# menuconfig o sdkconfig
+CONFIG_ZH_GATEWAY_MODE=ESP_NOW_LAN  # Ethernet preferito!
+CONFIG_ZH_GATEWAY_NTP_ENABLED=y
+CONFIG_ZH_GATEWAY_SYSLOG_ENABLED=y
+CONFIG_ZH_GATEWAY_OTA_ENABLED=y
+
+# MQTT settings
+CONFIG_ZH_MQTT_BROKER="192.168.1.100"  # LuckFox
+CONFIG_ZH_MQTT_PORT=1883
+CONFIG_ZH_MQTT_USERNAME="gateway"
+CONFIG_ZH_MQTT_PASSWORD="****"
 ```
 
 ### Heltec V3 (Meshtastic)
@@ -396,11 +554,12 @@ device:
 
 lora:
   region: EU_868
+  psk: "BASE64_CHIAVE_PERSONALIZZATA"  # IMPORTANTE!
 
 mqtt:
   enabled: true
-  address: mqtt://tuo-vps.hetzner.com:1883
-  username: xiaozhi
+  address: mqtts://tuo-vps.hetzner.com:8883  # TLS!
+  username: meshtastic
   password: ****
   encryption_enabled: true
   json_enabled: true
@@ -419,32 +578,43 @@ piper --download-voice it_IT-riccardo-medium
 # Automazioni
 pip install paho-mqtt
 
+# Sicurezza Mosquitto
+mosquitto_passwd -c /etc/mosquitto/passwd xiaozhi
+mosquitto_passwd /etc/mosquitto/passwd gateway
+mosquitto_passwd /etc/mosquitto/passwd meshtastic
+
 # Avvio servizi
 systemctl enable mosquitto
 ```
 
-### Sensori Indoor (ESPHome)
+### Sensori Indoor (ESPHome 2025.8+ con ESP-NOW)
 
 ```yaml
 # cucina.yaml
 esphome:
   name: cucina
-
-esp32:
+  platform: ESP32
   board: esp32dev
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-mqtt:
-  broker: 192.168.1.100  # LuckFox
+# ESP-NOW nativo! (ESPHome 2025.8+)
+esp_now:
+  encryption_key: "la_tua_chiave_16_bytes"
+  peers:
+    - mac_address: "AA:BB:CC:DD:EE:FF"  # Gateway ESP32-S3
 
 sensor:
   - platform: dht
     pin: GPIO4
     temperature:
       name: "Cucina Temperatura"
+      on_value:
+        then:
+          - esp_now.send:
+              peer: "AA:BB:CC:DD:EE:FF"
+              data: !lambda |-
+                char buf[32];
+                sprintf(buf, "{\"temp\":%.1f}", x);
+                return std::vector<uint8_t>(buf, buf + strlen(buf));
     humidity:
       name: "Cucina Umidita"
     update_interval: 30s
@@ -453,20 +623,55 @@ sensor:
     pin: GPIO34
     name: "Cucina Gas"
     update_interval: 10s
+    on_value_range:
+      - above: 800
+        then:
+          - esp_now.send:
+              peer: "AA:BB:CC:DD:EE:FF"
+              data: "ALERT:GAS"
 ```
 
 ---
 
 ## Riferimenti
 
-- [ESP-NOW-Gateway](https://github.com/aZholtikov/ESP-NOW-Gateway)
+### Progetti Principali
+- [zh_gateway (ESP-IDF)](https://github.com/aZholtikov/zh_gateway) - **Gateway preferito**
+- [ZHNetwork](https://github.com/aZholtikov/ZHNetwork) - Mesh stabile
+- [ESP-NOW-Gateway (Arduino)](https://github.com/aZholtikov/ESP-NOW-Gateway) - Alternativa semplice
+- [ESPHome](https://esphome.io/) - **ESP-NOW nativo dal 2025.8**
 - [OpenMQTTGateway](https://github.com/1technophile/OpenMQTTGateway)
-- [ESPHome](https://esphome.io/)
+
+### Meshtastic
 - [Meshtastic](https://meshtastic.org/)
 - [Meshtastic MQTT Integration](https://meshtastic.org/docs/software/integrations/mqtt/)
+- [meshtastic-bridge](https://github.com/geoffwhittington/meshtastic-bridge)
+
+### Infrastruttura
+- [Mosquitto](https://mosquitto.org/)
+- [NanoMQ](https://nanomq.io/) - MQTT ultra-leggero
 - [Piper TTS](https://github.com/rhasspy/piper)
 - [LuckFox Pico](https://www.luckfox.com/)
 
 ---
 
-*Documento generato durante sessione di brainstorming architetturale - Gennaio 2025*
+## Changelog
+
+### v2.0 (Gennaio 2025)
+- Aggiunto zh_gateway come alternativa preferita (ESP-IDF)
+- ESPHome 2025.8+ supporto ESP-NOW nativo
+- Struttura MQTT sync/ per resilienza VPS↔locale
+- Sezione sicurezza completa
+- Fase 1.5 test resilienza
+- Warning WiFi channel lock
+- Warning Meshtastic zero-hop policy
+- ZHNetwork come alternativa a painlessMesh
+- NanoMQ come alternativa leggera a Mosquitto
+- LuckFox Pico Ultra consigliato
+
+### v1.0 (Gennaio 2025)
+- Documento iniziale
+
+---
+
+*Documento aggiornato con feedback community e nuove release progetti open source - Gennaio 2025*
