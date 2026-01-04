@@ -166,10 +166,31 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
                 return '{"function_call": {"name": "cambia_profilo", "arguments": {"azione": "lista"}}}'
 
         # ============ RADIO ============
-        if match_any(['sintonizza', 'metti radio', 'ascolta radio', 'accendi radio']) or \
-           (match_any(['radio']) and match_any(['deejay', 'zeta', 'capital', 'm2o', 'italia', 'rai', '105', 'virgin', 'kiss', 'rtl'])):
-            station_match = re.search(r'radio\s*(\w+)', text_lower)
-            station = station_match.group(0) if station_match else ""
+        # Match diretto per nomi radio specifici (senza bisogno della parola "radio")
+        radio_names = ['deejay', 'zeta', 'capital', 'm2o', 'radio italia', 'rai radio', '105', 'virgin', 'kiss kiss', 'rtl', 'radicale', 'cusano', 'bbc']
+        is_radio_request = match_any(['sintonizza', 'metti radio', 'ascolta radio', 'accendi radio'])
+        if not is_radio_request:
+            # Check se menziona una radio specifica
+            for rname in radio_names:
+                if rname in text_lower:
+                    is_radio_request = True
+                    break
+
+        if is_radio_request:
+            # Estrai nome stazione - prova vari pattern
+            station = ""
+            # Pattern 1: "radio xyz"
+            station_match = re.search(r'radio\s*([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_lower)
+            if station_match:
+                station = station_match.group(0).strip()
+            else:
+                # Pattern 2: "sintonizza su xyz" o "metti xyz"
+                station_match = re.search(r'(?:sintonizza|metti|ascolta|accendi)\s+(?:su\s+)?([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_lower)
+                if station_match:
+                    station = station_match.group(1).strip()
+                    # Rimuovi "radio" se rimasto
+                    station = re.sub(r'^la\s+', '', station)
+
             if match_any(['elenco', 'lista', 'quali radio']):
                 return '{"function_call": {"name": "radio_italia", "arguments": {"action": "list"}}}'
             elif match_any(['stop', 'ferma', 'spegni']):

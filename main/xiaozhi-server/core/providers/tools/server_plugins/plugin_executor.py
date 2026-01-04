@@ -84,8 +84,20 @@ class ServerPluginExecutor(ToolExecutor):
         """获取所有注册的服务端插件工具"""
         tools = {}
 
-        # 获取必要的函数
-        necessary_functions = ["handle_exit_intent", "get_lunar"]
+        # 获取必要的函数 (CORE sempre attive)
+        necessary_functions = [
+            "handle_exit_intent", "get_lunar",
+            # AI e risposta
+            "risposta_ai", "web_search",
+            # Sistema
+            "sommario_funzioni", "cambia_profilo", "aiuto_profilo",
+            # Easter egg e personalità
+            "personalita_multiple", "easter_egg_folli", "giannino_easter_egg",
+            # Utility base
+            "meteo_italia", "timer_sveglia", "calcolatrice",
+            # Media
+            "radio_italia", "notizie_italia",
+        ]
 
         # 获取配置中的函数
         config_functions = self.config["Intent"][

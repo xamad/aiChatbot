@@ -78,6 +78,24 @@ RADIO_STATIONS = {
         "referer": "https://www.kisskiss.it/",
         "desc": "Hit del momento"
     },
+    "rtl 102.5": {
+        "name": "RTL 102.5",
+        "url": "https://streamingv2.shoutcast.com/rtl-1025",
+        "referer": "https://www.rtl.it/",
+        "desc": "Very Normal People - Hit italiane e internazionali"
+    },
+    "rtl": {
+        "name": "RTL 102.5",
+        "url": "https://streamingv2.shoutcast.com/rtl-1025",
+        "referer": "https://www.rtl.it/",
+        "desc": "Very Normal People - Hit italiane e internazionali"
+    },
+    "rtl 102": {
+        "name": "RTL 102.5",
+        "url": "https://streamingv2.shoutcast.com/rtl-1025",
+        "referer": "https://www.rtl.it/",
+        "desc": "Very Normal People"
+    },
     # === RAI RADIO ===
     "rai radio 1": {
         "name": "Rai Radio 1",
