@@ -17,7 +17,7 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 30  # Secondi per chunk (ridotto per meno latenza)
+CHUNK_DURATION = 120  # Secondi per chunk (2 minuti per ascolto più lungo)
 MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione continua
 
 # Stazioni radio italiane con stream URL verificati (Gennaio 2026)
@@ -221,8 +221,8 @@ def capture_radio_chunk(url: str, output_path: str, duration: int = 30, referer:
         raw_file = output_path.replace('.mp3', '_raw.dat')
 
         try:
-            # Calcola bytes da scaricare (128kbps = 16KB/s)
-            bytes_to_download = duration * 16 * 1024
+            # Calcola bytes da scaricare (assumo 192kbps = 24KB/s per sicurezza)
+            bytes_to_download = duration * 24 * 1024
 
             with urllib.request.urlopen(req, timeout=duration + 30) as resp:
                 if resp.status != 200:
