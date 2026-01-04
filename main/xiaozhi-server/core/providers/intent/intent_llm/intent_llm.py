@@ -548,8 +548,11 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             if pers in text_lower:
                 # Normalizza ubriaca -> ubriaco, sbronza -> sbronzo
                 pers_normalized = pers.replace('ubriaca', 'ubriaco').replace('sbronza', 'sbronzo')
-                # E poi se c'è un trigger appropriato
-                if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'fai la', 'modalità',
+                # Pattern semplice: solo la keyword (es. "ubriaca", "pirata")
+                # Se il testo è breve (<20 char) o contiene "fai" generico, attiva
+                is_simple = len(text.strip()) < 20 or 'fai' in text_lower
+                # E poi se c'è un trigger appropriato O è una richiesta semplice
+                if is_simple or match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'fai la', 'modalità',
                              'cambia personalità', 'voce da', 'come un', 'essere un', 'parla da']):
                     return f'{{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "{pers_normalized}"}}}}}}'
         if match_any(['torna normale', 'basta personalità', 'smetti di fare', 'torna te stesso']):
@@ -566,7 +569,7 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['confessami', 'ho peccato', 'devo confessare']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "confessione"}}}'
         if match_any(['litiga con te stesso', 'litiga con te stessa', 'litiga con se stesso', 'litiga con se stessa',
-                      'fai casino', 'fai il pazzo', 'fai la pazza', 'litigate']):
+                      'fai casino', 'fai il pazzo', 'fai la pazza', 'litigate', 'litiga', 'litigare']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "litigio"}}}'
         if match_any(['dimmi una profezia', 'predici il futuro', 'cosa mi succederà']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "profezia"}}}'
