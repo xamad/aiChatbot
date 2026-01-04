@@ -17,7 +17,7 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 120  # Secondi per chunk (2 minuti per ascolto più lungo)
+CHUNK_DURATION = 600  # Secondi per chunk (10 minuti - utente può dire "stop" o "exit" per fermare)
 MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione continua
 
 # Stazioni radio italiane con stream URL verificati (Gennaio 2026)
@@ -266,7 +266,7 @@ def capture_radio_chunk(url: str, output_path: str, duration: int = 30, referer:
                     "-c:a", "libmp3lame", "-b:a", "128k",
                     output_path
                 ]
-                subprocess.run(cmd, capture_output=True, timeout=60)
+                subprocess.run(cmd, capture_output=True, timeout=180)
 
                 if os.path.exists(raw_file):
                     os.remove(raw_file)
@@ -354,7 +354,7 @@ def capture_hls_stream(url: str, output_path: str, duration: int, headers: dict)
                 "-c:a", "libmp3lame", "-b:a", "128k",
                 output_path
             ]
-            subprocess.run(cmd, capture_output=True, timeout=60)
+            subprocess.run(cmd, capture_output=True, timeout=180)
             os.remove(raw_file)
 
             if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
