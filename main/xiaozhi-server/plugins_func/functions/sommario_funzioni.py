@@ -1,10 +1,21 @@
 """
 Sommario Funzioni Plugin - Elenca tutte le funzionalità disponibili
 Aiuta l'utente a scoprire cosa può fare il chatbot
+Ora profile-aware: mostra solo le funzioni del profilo attivo
 """
 
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
+
+# Import profilo per verificare profilo attivo
+try:
+    from plugins_func.functions.cambia_profilo import get_device_profile, get_session_id, get_profile_info
+    PROFILE_AWARE = True
+except ImportError:
+    PROFILE_AWARE = False
+    def get_device_profile(d): return "generale"
+    def get_session_id(c): return "default"
+    def get_profile_info(p): return None
 
 TAG = __name__
 logger = setup_logging()
@@ -116,6 +127,19 @@ SOMMARIO_FUNCTION_DESC = {
 def sommario_funzioni(conn, categoria: str = None):
     logger.bind(tag=TAG).info(f"Sommario: categoria={categoria}")
 
+    # Ottieni profilo attivo
+    device_id = get_session_id(conn) if PROFILE_AWARE else "default"
+    current_profile = get_device_profile(device_id) if PROFILE_AWARE else "generale"
+    profile_info = get_profile_info(current_profile) if PROFILE_AWARE else None
+
+    # Header con info profilo
+    profile_header = ""
+    profile_spoken = ""
+    if profile_info and current_profile != "generale":
+        profile_header = f"📋 **Profilo attivo:** {profile_info['icona']} {profile_info['nome']}\n"
+        profile_header += f"_({profile_info['total_functions']} funzioni disponibili)_\n\n"
+        profile_spoken = f"Con il profilo {profile_info['nome']} attivo, "
+
     if categoria:
         # Cerca categoria
         cat_lower = categoria.lower()
@@ -129,7 +153,7 @@ def sommario_funzioni(conn, categoria: str = None):
                 break
 
         if found_funcs:
-            result = f"**{found_cat}**\n\n"
+            result = profile_header + f"**{found_cat}**\n\n"
             spoken_parts = []
 
             for f in found_funcs:
@@ -137,7 +161,7 @@ def sommario_funzioni(conn, categoria: str = None):
                 result += f"  → _\"{f['trigger']}\"_\n\n"
                 spoken_parts.append(f"{f['nome']}, dì: {f['trigger']}")
 
-            spoken = f"In {found_cat.split(' ', 1)[1]}: " + ". ".join(spoken_parts[:4])
+            spoken = profile_spoken + f"In {found_cat.split(' ', 1)[1]}: " + ". ".join(spoken_parts[:4])
             if len(spoken_parts) > 4:
                 spoken += f". E altre {len(spoken_parts) - 4} funzioni."
 
@@ -145,11 +169,11 @@ def sommario_funzioni(conn, categoria: str = None):
         else:
             categorie = [c.split(' ', 1)[1] for c in FUNZIONALITA.keys()]
             return ActionResponse(Action.RESPONSE,
-                f"Categoria non trovata. Categorie: {', '.join(categorie)}",
-                f"Non ho quella categoria. Prova: {', '.join(categorie[:5])}")
+                profile_header + f"Categoria non trovata. Categorie: {', '.join(categorie)}",
+                profile_spoken + f"Non ho quella categoria. Prova: {', '.join(categorie[:5])}")
 
     # Elenco completo con trigger
-    result = "# 🤖 TUTTE LE MIE FUNZIONALITÀ\n\n"
+    result = profile_header + "# 🤖 TUTTE LE MIE FUNZIONALITÀ\n\n"
 
     total_funcs = 0
     for cat_name, funcs in FUNZIONALITA.items():
@@ -160,11 +184,17 @@ def sommario_funzioni(conn, categoria: str = None):
         result += "\n"
 
     result += f"---\n**Totale: {total_funcs} funzioni!**\n"
-    result += "Chiedi \"funzioni [categoria]\" per dettagli."
+
+    # Aggiungi info su profilo
+    if current_profile != "generale" and profile_info:
+        result += f"\n💡 _Alcune funzioni potrebbero non essere attive con il profilo {profile_info['nome']}._\n"
+        result += "_Dì 'cambia profilo in generale' per attivarle tutte._"
+
+    result += "\nChiedi \"funzioni [categoria]\" per dettagli."
 
     # Versione parlata breve
     categorie = [c.split(' ', 1)[1] for c in list(FUNZIONALITA.keys())[:6]]
-    spoken = f"Ho {total_funcs} funzioni! Categorie: {', '.join(categorie)} e altre. "
+    spoken = profile_spoken + f"Ho {total_funcs} funzioni! Categorie: {', '.join(categorie)} e altre. "
     spoken += "Quale categoria ti interessa?"
 
     return ActionResponse(Action.RESPONSE, result, spoken)

@@ -433,15 +433,21 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ SOMMARIO FUNZIONI ============
         # "cosa sai fare" va a CHI_SONO, qui solo richieste esplicite di elenco
         # Supporta richiesta per categoria specifica
-        categorie_sommario = ['audio', 'media', 'giochi', 'informazioni', 'info', 'cucina', 'ricette',
+        categorie_sommario = ['audio', 'media', 'giochi', 'gioco', 'informazioni', 'info', 'cucina', 'ricette',
                               'utilità', 'utility', 'traduzione', 'ricerca', 'benessere', 'casa', 'domotica',
                               'guide', 'bambini', 'famiglia', 'personalità']
+
+        # Prima controlla se è una richiesta di categoria specifica: "funzionalità giochi", "quali giochi hai"
+        for cat in categorie_sommario:
+            if cat in text_lower and match_any(['funzionalita', 'funzionalità', 'funzioni', 'quali', 'elenco', 'lista']):
+                cat_normalized = 'giochi' if cat == 'gioco' else cat
+                return f'{{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "{cat_normalized}"}}}}}}'
+
+        # Poi controlla richieste generiche di elenco funzioni
         if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'funzionalità disponibili',
-                      'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con']):
-            # Cerca se c'è una categoria specifica
-            for cat in categorie_sommario:
-                if cat in text_lower:
-                    return f'{{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "{cat}"}}}}}}'
+                      'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con',
+                      'elenco funzionalita', 'elenco funzionalità', 'lista funzionalita', 'lista funzionalità',
+                      'che funzioni hai', 'che funzionalità hai', 'funzioni disponibili']):
             return '{"function_call": {"name": "sommario_funzioni"}}'
 
         # ============ SUPPORTO EMOTIVO (ansia, paura - NON solitudine) ============
@@ -528,16 +534,24 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return f'{{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "{text}"}}}}}}'
 
         # ============ PERSONALITÀ MULTIPLE ============
+        # Lista personalità disponibili
+        if match_any(['lista personalita', 'lista personalità', 'elenco personalita', 'elenco personalità',
+                      'quali personalita', 'quali personalità', 'personalità disponibili', 'che personalità hai',
+                      'che voci hai', 'quali voci hai', 'quali personaggi', 'personaggi disponibili']):
+            return '{"function_call": {"name": "personalita_multiple", "arguments": {"personalita": "lista"}}}'
+
         # SOLO se c'è una keyword specifica di personalità, altrimenti non matchare
         personalita_keywords = ['pirata', 'robot', 'nonno', 'maggiordomo', 'bambino', 'poeta',
-                               'complottista', 'nonna', 'filosofo', 'ubriaco', 'brillo', 'sbronzo']
+                               'complottista', 'nonna', 'filosofo', 'ubriaco', 'ubriaca', 'brillo', 'sbronzo', 'sbronza']
         # Controlla PRIMA se c'è una keyword di personalità
         for pers in personalita_keywords:
             if pers in text_lower:
+                # Normalizza ubriaca -> ubriaco, sbronza -> sbronzo
+                pers_normalized = pers.replace('ubriaca', 'ubriaco').replace('sbronza', 'sbronzo')
                 # E poi se c'è un trigger appropriato
-                if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'modalità',
-                             'cambia personalità', 'voce da', 'come un', 'essere un']):
-                    return f'{{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "{pers}"}}}}}}'
+                if match_any(['trasformati in', 'parla come', 'diventa un', 'fai il', 'fai la', 'modalità',
+                             'cambia personalità', 'voce da', 'come un', 'essere un', 'parla da']):
+                    return f'{{"function_call": {{"name": "personalita_multiple", "arguments": {{"personalita": "{pers_normalized}"}}}}}}'
         if match_any(['torna normale', 'basta personalità', 'smetti di fare', 'torna te stesso']):
             return '{"function_call": {"name": "personalita_multiple", "arguments": {"personalita": "normale"}}}'
 
@@ -551,7 +565,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "insulto"}}}'
         if match_any(['confessami', 'ho peccato', 'devo confessare']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "confessione"}}}'
-        if match_any(['litiga con te stesso', 'fai casino', 'fai il pazzo']):
+        if match_any(['litiga con te stesso', 'litiga con te stessa', 'litiga con se stesso', 'litiga con se stessa',
+                      'fai casino', 'fai il pazzo', 'fai la pazza', 'litigate']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "litigio"}}}'
         if match_any(['dimmi una profezia', 'predici il futuro', 'cosa mi succederà']):
             return '{"function_call": {"name": "easter_egg_folli", "arguments": {"tipo": "profezia"}}}'
@@ -609,151 +624,6 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
 
         # ============ FALLBACK: RISPOSTA AI (Groq LLM) ============
         # Se nessun pattern specifico ha matchato, usa l'AI per rispondere
-        # Questo evita di passare all'LLM per il riconoscimento intent
+        # Questo permette conversazioni fluide anche senza trigger specifici
         logger.bind(tag=TAG).debug(f"Nessun pattern matchato, fallback a risposta_ai: {text[:50]}...")
         return f'{{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "{text}"}}}}}}'
-
-        # 记录整体开始时间
-        total_start_time = time.time()
-
-        # 打印使用的模型信息
-        model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))
-        logger.bind(tag=TAG).debug(f"使用意图识别模型: {model_info}")
-
-        # 计算缓存键
-        cache_key = hashlib.md5((conn.device_id + text).encode()).hexdigest()
-
-        # 检查缓存
-        cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
-        if cached_intent is not None:
-            cache_time = time.time() - total_start_time
-            logger.bind(tag=TAG).debug(
-                f"使用缓存的意图: {cache_key} -> {cached_intent}, 耗时: {cache_time:.4f}秒"
-            )
-            return cached_intent
-
-        if self.promot == "":
-            functions = conn.func_handler.get_functions()
-            if hasattr(conn, "mcp_client"):
-                mcp_tools = conn.mcp_client.get_available_tools()
-                if mcp_tools is not None and len(mcp_tools) > 0:
-                    if functions is None:
-                        functions = []
-                    functions.extend(mcp_tools)
-
-            self.promot = self.get_intent_system_prompt(functions)
-
-        music_config = initialize_music_handler(conn)
-        music_file_names = music_config["music_file_names"]
-        prompt_music = f"{self.promot}\n<musicNames>{music_file_names}\n</musicNames>"
-
-        home_assistant_cfg = conn.config["plugins"].get("home_assistant")
-        if home_assistant_cfg:
-            devices = home_assistant_cfg.get("devices", [])
-        else:
-            devices = []
-        if len(devices) > 0:
-            hass_prompt = "\n下面是我家智能设备列表（位置，设备名，entity_id），可以通过homeassistant控制\n"
-            for device in devices:
-                hass_prompt += device + "\n"
-            prompt_music += hass_prompt
-
-        logger.bind(tag=TAG).debug(f"User prompt: {prompt_music}")
-
-        # 构建用户对话历史的提示
-        msgStr = ""
-
-        # 获取最近的对话历史
-        start_idx = max(0, len(dialogue_history) - self.history_count)
-        for i in range(start_idx, len(dialogue_history)):
-            msgStr += f"{dialogue_history[i].role}: {dialogue_history[i].content}\n"
-
-        msgStr += f"User: {text}\n"
-        user_prompt = f"current dialogue:\n{msgStr}"
-
-        # 记录预处理完成时间
-        preprocess_time = time.time() - total_start_time
-        logger.bind(tag=TAG).debug(f"意图识别预处理耗时: {preprocess_time:.4f}秒")
-
-        # 使用LLM进行意图识别
-        llm_start_time = time.time()
-        logger.bind(tag=TAG).debug(f"开始LLM意图识别调用, 模型: {model_info}")
-
-        intent = self.llm.response_no_stream(
-            system_prompt=prompt_music, user_prompt=user_prompt
-        )
-
-        # 记录LLM调用完成时间
-        llm_time = time.time() - llm_start_time
-        logger.bind(tag=TAG).debug(
-            f"外挂的大模型意图识别完成, 模型: {model_info}, 调用耗时: {llm_time:.4f}秒"
-        )
-
-        # 记录后处理开始时间
-        postprocess_start_time = time.time()
-
-        # 清理和解析响应
-        intent = intent.strip()
-        # 尝试提取JSON部分
-        match = re.search(r"\{.*\}", intent, re.DOTALL)
-        if match:
-            intent = match.group(0)
-
-        # 记录总处理时间
-        total_time = time.time() - total_start_time
-        logger.bind(tag=TAG).debug(
-            f"【意图识别性能】模型: {model_info}, 总耗时: {total_time:.4f}秒, LLM调用: {llm_time:.4f}秒, 查询: '{text[:20]}...'"
-        )
-
-        # 尝试解析为JSON
-        try:
-            intent_data = json.loads(intent)
-            # 如果包含function_call，则格式化为适合处理的格式
-            if "function_call" in intent_data:
-                function_data = intent_data["function_call"]
-                function_name = function_data.get("name")
-                function_args = function_data.get("arguments", {})
-
-                # 记录识别到的function call
-                logger.bind(tag=TAG).info(
-                    f"llm 识别到意图: {function_name}, 参数: {function_args}"
-                )
-
-                # 处理不同类型的意图
-                if function_name == "result_for_context":
-                    # 处理基础信息查询，直接从context构建结果
-                    logger.bind(tag=TAG).info(
-                        "检测到result_for_context意图，将使用上下文信息直接回答"
-                    )
-
-                elif function_name == "continue_chat":
-                    # 处理普通对话
-                    # 保留非工具相关的消息
-                    clean_history = [
-                        msg
-                        for msg in conn.dialogue.dialogue
-                        if msg.role not in ["tool", "function"]
-                    ]
-                    conn.dialogue.dialogue = clean_history
-
-                else:
-                    # 处理函数调用
-                    logger.bind(tag=TAG).info(f"检测到函数调用意图: {function_name}")
-
-            # 统一缓存处理和返回
-            self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
-            postprocess_time = time.time() - postprocess_start_time
-            logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
-            return intent
-        except json.JSONDecodeError:
-            # 后处理时间
-            postprocess_time = time.time() - postprocess_start_time
-            logger.bind(tag=TAG).error(
-                f"无法解析意图JSON: {intent}, 后处理耗时: {postprocess_time:.4f}秒"
-            )
-            # Fallback: usa risposta_intelligente per dare comunque una risposta vocale
-            # invece di bloccarsi su continue_chat che può non rispondere
-            logger.bind(tag=TAG).info(
-                f"Fallback: uso risposta_intelligente per: {text[:50]}..."
-            )
-            return f'{{"function_call": {{"name": "risposta_intelligente", "arguments": {{"domanda": "{text}"}}}}}}'

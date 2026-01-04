@@ -167,6 +167,27 @@ def personalita_multiple(conn, personalita: str = None):
     """Cambia la personalità del chatbot"""
     global _personalita_attiva
 
+    # LISTA personalità disponibili
+    if personalita and personalita.lower() == 'lista':
+        nomi = []
+        for key, val in PERSONALITA.items():
+            nomi.append(f"**{val['nome']}** ({key})")
+
+        result = "🎭 **Personalità Disponibili:**\n\n" + "\n".join(nomi)
+        result += "\n\n_Dì: 'parla come [nome]' per attivarla!_"
+
+        if _personalita_attiva:
+            attiva = PERSONALITA[_personalita_attiva]['nome']
+            result += f"\n\n⚡ **Attiva ora:** {attiva}"
+            spoken = f"Ho {len(PERSONALITA)} personalità. Ora sono {attiva}. "
+        else:
+            spoken = f"Ho {len(PERSONALITA)} personalità diverse. "
+
+        spoken += "Posso essere: " + ", ".join([v['nome'] for v in list(PERSONALITA.values())[:4]])
+        spoken += ", e altri! Dì parla come, e poi il nome."
+
+        return ActionResponse(action=Action.RESPONSE, result=result, response=spoken)
+
     if not personalita or personalita.lower() in ['normale', 'reset', 'default', 'torna normale']:
         _personalita_attiva = None
         return ActionResponse(
