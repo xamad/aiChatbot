@@ -17,8 +17,8 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 600  # Secondi per chunk (10 minuti - utente può dire "stop" o "exit" per fermare)
-MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione continua
+CHUNK_DURATION = 60  # Secondi per singolo chunk (1 minuto - streaming progressivo)
+MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione (10 chunk x 60s = 10 minuti totali)
 
 # Stazioni radio italiane con stream URL verificati (Gennaio 2026)
 # Mix di stream MP3 diretti e HLS (m3u8)
@@ -414,59 +414,87 @@ def radio_italia(conn, action: str = "list", station: str = None):
 
 
 async def capture_and_play_radio(conn, station: dict):
-    """Cattura chunk radio e riproducilo"""
+    """Cattura e riproduce chunk radio in streaming progressivo"""
     try:
         station_name = station["name"]
         url = station["url"]
-        referer = station.get("referer")  # Referer per CDN
+        referer = station.get("referer")
 
         await send_stt_message(conn, f"Sintonizzazione su {station_name}...")
 
-        # Nome file cache
         safe_name = station_name.lower().replace(" ", "_").replace(".", "")
-        output_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}.mp3")
-
-        # Cattura in thread separato con referer
         loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(
-            None,
-            lambda: capture_radio_chunk(url, output_path, CHUNK_DURATION, referer)
-        )
 
-        if success and os.path.exists(output_path):
-            await play_radio_chunk(conn, output_path, station_name)
-        else:
-            await send_stt_message(conn, f"Non riesco a sintonizzare {station_name}")
+        # Streaming progressivo: scarica e riproduci chunk uno alla volta
+        for chunk_num in range(MAX_CONTINUOUS_CHUNKS):
+            # Verifica se la connessione è ancora attiva
+            if not hasattr(conn, 'websocket') or conn.websocket is None:
+                logger.bind(tag=TAG).warning("Connessione chiusa, fermo radio")
+                break
+
+            try:
+                # Controlla stato websocket
+                if hasattr(conn.websocket, 'closed') and conn.websocket.closed:
+                    logger.bind(tag=TAG).warning("WebSocket chiuso, fermo radio")
+                    break
+            except Exception:
+                pass
+
+            output_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}_{chunk_num}.mp3")
+
+            # Scarica chunk
+            success = await loop.run_in_executor(
+                None,
+                lambda p=output_path: capture_radio_chunk(url, p, CHUNK_DURATION, referer)
+            )
+
+            if success and os.path.exists(output_path):
+                # Riproduci chunk
+                await play_radio_chunk(conn, output_path, station_name, is_first=(chunk_num == 0))
+                logger.bind(tag=TAG).info(f"Radio chunk {chunk_num + 1}/{MAX_CONTINUOUS_CHUNKS} riprodotto")
+
+                # Breve pausa tra chunk per permettere riproduzione
+                await asyncio.sleep(1)
+            else:
+                logger.bind(tag=TAG).error(f"Chunk {chunk_num} fallito")
+                if chunk_num == 0:
+                    await send_stt_message(conn, f"Non riesco a sintonizzare {station_name}")
+                break
+
+        logger.bind(tag=TAG).info(f"Streaming {station_name} completato")
 
     except Exception as e:
         logger.bind(tag=TAG).error(f"Errore capture_and_play_radio: {e}")
 
 
-async def play_radio_chunk(conn, audio_path: str, station_name: str):
+async def play_radio_chunk(conn, audio_path: str, station_name: str, is_first: bool = True):
     """Riproduce il chunk audio della radio"""
     try:
-        text = f"Ecco {station_name}!"
-        await send_stt_message(conn, text)
-        conn.dialogue.put(Message(role="assistant", content=text))
+        # Solo il primo chunk ha l'annuncio
+        if is_first:
+            text = f"Ecco {station_name}!"
+            await send_stt_message(conn, text)
+            conn.dialogue.put(Message(role="assistant", content=text))
 
-        if conn.intent_type == "intent_llm":
+            if conn.intent_type == "intent_llm":
+                conn.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=conn.sentence_id,
+                        sentence_type=SentenceType.FIRST,
+                        content_type=ContentType.ACTION,
+                    )
+                )
+
             conn.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.FIRST,
-                    content_type=ContentType.ACTION,
+                    sentence_type=SentenceType.MIDDLE,
+                    content_type=ContentType.TEXT,
+                    content_detail=text,
                 )
             )
 
-        conn.tts.tts_text_queue.put(
-            TTSMessageDTO(
-                sentence_id=conn.sentence_id,
-                sentence_type=SentenceType.MIDDLE,
-                content_type=ContentType.TEXT,
-                content_detail=text,
-            )
-        )
-
+        # Invia file audio
         conn.tts.tts_text_queue.put(
             TTSMessageDTO(
                 sentence_id=conn.sentence_id,
@@ -476,16 +504,7 @@ async def play_radio_chunk(conn, audio_path: str, station_name: str):
             )
         )
 
-        if conn.intent_type == "intent_llm":
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.LAST,
-                    content_type=ContentType.ACTION,
-                )
-            )
-
-        logger.bind(tag=TAG).info(f"Radio in riproduzione: {station_name}")
+        logger.bind(tag=TAG).info(f"Radio chunk in coda: {station_name}")
 
     except Exception as e:
         logger.bind(tag=TAG).error(f"Errore riproduzione radio: {e}")

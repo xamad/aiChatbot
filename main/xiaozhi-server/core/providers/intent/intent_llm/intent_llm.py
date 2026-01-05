@@ -168,11 +168,15 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ RADIO ============
         # Match diretto per nomi radio specifici (senza bisogno della parola "radio")
         radio_names = ['deejay', 'zeta', 'capital', 'm2o', 'radio italia', 'rai radio', '105', 'virgin', 'kiss kiss', 'rtl', 'radicale', 'cusano', 'bbc']
-        is_radio_request = match_any(['sintonizza', 'metti radio', 'ascolta radio', 'accendi radio'])
+        # Normalizza: "radiozeta" -> "radio zeta", "radioitalia" -> "radio italia"
+        text_normalized = re.sub(r'radio(\w)', r'radio \1', text_lower)
+
+        is_radio_request = match_any(['sintonizza', 'sintonizzati', 'metti radio', 'ascolta radio', 'accendi radio',
+                                      'fammi sentire', 'fammi ascoltare', 'fai partire'])
         if not is_radio_request:
             # Check se menziona una radio specifica
             for rname in radio_names:
-                if rname in text_lower:
+                if rname in text_normalized:
                     is_radio_request = True
                     break
 
@@ -180,12 +184,12 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             # Estrai nome stazione - prova vari pattern
             station = ""
             # Pattern 1: "radio xyz"
-            station_match = re.search(r'radio\s*([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_lower)
+            station_match = re.search(r'radio\s*([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_normalized)
             if station_match:
                 station = station_match.group(0).strip()
             else:
-                # Pattern 2: "sintonizza su xyz" o "metti xyz"
-                station_match = re.search(r'(?:sintonizza|metti|ascolta|accendi)\s+(?:su\s+)?([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_lower)
+                # Pattern 2: "sintonizza/sintonizzati su xyz" o "metti xyz" o "fammi sentire xyz"
+                station_match = re.search(r'(?:sintonizza|sintonizzati|metti|ascolta|accendi|sentire|ascoltare)\s+(?:su\s+|la\s+)?([\w\s\.]+?)(?:\s*$|\s*(?:per|che|cosa))', text_normalized)
                 if station_match:
                     station = station_match.group(1).strip()
                     # Rimuovi "radio" se rimasto
