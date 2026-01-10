@@ -315,6 +315,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_LILYGO_T_CIRCLE_S3
         bool "LILYGO T-Circle-S3"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_XAMAD_S3_DIY
+        bool "XAMAD ESP32-S3 DIY (TFT 1.8 + INMP441 + MAX98357A)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
         bool "LILYGO T-CameraPlus-S3_V1_0_V1_1"
         depends on IDF_TARGET_ESP32S3
@@ -582,7 +585,7 @@ choice DISPLAY_STYLE
 
     config USE_EMOTE_MESSAGE_STYLE
         bool "Emote animation style"
-        depends on BOARD_TYPE_ESP_BOX_3 || BOARD_TYPE_ECHOEAR || BOARD_TYPE_LICHUANG_DEV_S3
+        depends on BOARD_TYPE_ESP_BOX_3 || BOARD_TYPE_ECHOEAR || BOARD_TYPE_LICHUANG_DEV_S3 || BOARD_TYPE_XAMAD_S3_DIY
 endchoice
 
 choice WAKE_WORD_TYPE
