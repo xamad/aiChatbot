@@ -16,6 +16,10 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include <mbedtls/base64.h>
+#include "display/lvgl_display/jpg/jpeg_to_image.h"
+#include "display/lvgl_display/lvgl_image.h"
+#include "display/lvgl_display/lvgl_display.h"
 
 #define TAG "Application"
 
@@ -597,6 +601,97 @@ void Application::InitializeProtocol() {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
             }
 #endif
+        } else if (strcmp(type->valuestring, "image") == 0) {
+            // Handle image display from server
+            auto data = cJSON_GetObjectItem(root, "data");
+            if (cJSON_IsString(data)) {
+                std::string base64_data = data->valuestring;
+                Schedule([this, base64_data]() {
+                    auto lvgl_display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+                    if (!lvgl_display) {
+                        ESP_LOGW(TAG, "Display does not support preview images");
+                        return;
+                    }
+                    // Decode base64
+                    size_t decoded_len = 0;
+                    mbedtls_base64_decode(nullptr, 0, &decoded_len,
+                        (const unsigned char*)base64_data.c_str(), base64_data.length());
+
+                    std::vector<uint8_t> jpeg_data(decoded_len);
+                    if (mbedtls_base64_decode(jpeg_data.data(), decoded_len, &decoded_len,
+                        (const unsigned char*)base64_data.c_str(), base64_data.length()) == 0) {
+
+                        // Decode JPEG to RGB565
+                        uint8_t* rgb_data = nullptr;
+                        size_t rgb_len = 0, width = 0, height = 0, stride = 0;
+
+                        if (jpeg_to_image(jpeg_data.data(), jpeg_data.size(),
+                            &rgb_data, &rgb_len, &width, &height, &stride) == ESP_OK) {
+
+                            ESP_LOGI(TAG, "Image decoded: %dx%d", (int)width, (int)height);
+                            auto image = std::make_unique<LvglAllocatedImage>(
+                                rgb_data, rgb_len, width, height, stride, LV_COLOR_FORMAT_RGB565);
+                            lvgl_display->SetPreviewImage(std::move(image));
+                        } else {
+                            ESP_LOGE(TAG, "Failed to decode JPEG image");
+                        }
+                    } else {
+                        ESP_LOGE(TAG, "Failed to decode base64 image data");
+                    }
+                });
+            }
+        } else if (strcmp(type->valuestring, "gif") == 0) {
+            // Handle GIF animation (sequence of JPEG frames)
+            auto frames = cJSON_GetObjectItem(root, "frames");
+            if (cJSON_IsArray(frames) && cJSON_GetArraySize(frames) > 0) {
+                ESP_LOGI(TAG, "Received GIF with %d frames", cJSON_GetArraySize(frames));
+                // For now, just display the first frame
+                cJSON* first_frame = cJSON_GetArrayItem(frames, 0);
+                if (cJSON_IsString(first_frame)) {
+                    std::string base64_data = first_frame->valuestring;
+                    Schedule([this, base64_data]() {
+                        auto lvgl_display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+                        if (!lvgl_display) return;
+
+                        size_t decoded_len = 0;
+                        mbedtls_base64_decode(nullptr, 0, &decoded_len,
+                            (const unsigned char*)base64_data.c_str(), base64_data.length());
+
+                        std::vector<uint8_t> jpeg_data(decoded_len);
+                        if (mbedtls_base64_decode(jpeg_data.data(), decoded_len, &decoded_len,
+                            (const unsigned char*)base64_data.c_str(), base64_data.length()) == 0) {
+
+                            uint8_t* rgb_data = nullptr;
+                            size_t rgb_len = 0, width = 0, height = 0, stride = 0;
+
+                            if (jpeg_to_image(jpeg_data.data(), jpeg_data.size(),
+                                &rgb_data, &rgb_len, &width, &height, &stride) == ESP_OK) {
+
+                                auto image = std::make_unique<LvglAllocatedImage>(
+                                    rgb_data, rgb_len, width, height, stride, LV_COLOR_FORMAT_RGB565);
+                                lvgl_display->SetPreviewImage(std::move(image));
+                            }
+                        }
+                    });
+                }
+            }
+        } else if (strcmp(type->valuestring, "audio_play") == 0) {
+            // Handle audio playback command
+            auto action = cJSON_GetObjectItem(root, "action");
+            auto url = cJSON_GetObjectItem(root, "url");
+            if (cJSON_IsString(action)) {
+                if (strcmp(action->valuestring, "play") == 0 && cJSON_IsString(url)) {
+                    ESP_LOGI(TAG, "Audio play request: %s", url->valuestring);
+                    // TODO: Implement HTTP audio streaming
+                    // For now, just log the request
+                    Schedule([this, display]() {
+                        display->ShowNotification("Audio play not yet implemented", 2000);
+                    });
+                } else if (strcmp(action->valuestring, "stop") == 0) {
+                    ESP_LOGI(TAG, "Audio stop request");
+                    // TODO: Stop audio playback
+                }
+            }
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
