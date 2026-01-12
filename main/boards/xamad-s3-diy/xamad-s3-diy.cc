@@ -134,7 +134,7 @@ private:
 public:
     XamadS3DiyBoard() : boot_button_(BOOT_BUTTON_GPIO) {
         ESP_LOGI(TAG, "Initializing XAMAD ESP32-S3 DIY Board");
-        InitializeBacklightGpio();  // Turn on backlight first!
+        InitializeBacklightGpio();
         InitializeAmplifier();
         InitializeSpi();
         InitializeLcdDisplay();
@@ -148,16 +148,21 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
+        // 10-param constructor: SPK=LEFT, MIC=RIGHT
+        // Order: sample_rates, spk_bclk, spk_ws, spk_dout, SPK_SLOT, mic_sck, mic_ws, mic_din, MIC_SLOT
         static NoAudioCodecSimplex audio_codec(
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK,
             AUDIO_I2S_SPK_GPIO_LRCK,
             AUDIO_I2S_SPK_GPIO_DOUT,
+            I2S_STD_SLOT_LEFT,        // SPK slot (MAX98357A = LEFT)
             AUDIO_I2S_MIC_GPIO_SCK,
             AUDIO_I2S_MIC_GPIO_WS,
-            AUDIO_I2S_MIC_GPIO_DIN
+            AUDIO_I2S_MIC_GPIO_DIN,
+            I2S_STD_SLOT_LEFT         // MIC slot - LEFT (INMP441 L/R=GND)
         );
+        ESP_LOGI(TAG, "Audio codec: SPK=LEFT, MIC=LEFT");
         return &audio_codec;
     }
 

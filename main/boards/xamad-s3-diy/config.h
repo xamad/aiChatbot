@@ -28,8 +28,8 @@
 
 // MAX98357A Speaker I2S Pins
 #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_18   // Data Out (DIN)
-#define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_5    // Bit Clock (BCLK) - changed from 45
-#define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_6    // L/R Clock (LRC) - changed from 46
+#define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_5    // Bit Clock (BCLK)
+#define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_6    // L/R Clock (LRC)
 #define AUDIO_CODEC_PA_PIN      GPIO_NUM_17   // Amplifier Enable (SD)
 
 // Buttons
