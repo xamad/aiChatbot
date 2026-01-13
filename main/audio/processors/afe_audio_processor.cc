@@ -92,6 +92,11 @@ void AfeAudioProcessor::Feed(std::vector<int16_t>&& data) {
     if (afe_data_ == nullptr) {
         return;
     }
+    static int feed_count = 0;
+    feed_count++;
+    if (feed_count <= 3 || feed_count % 50 == 0) {
+        ESP_LOGI(TAG, "[AFE] Feed #%d, %d samples", feed_count, (int)data.size());
+    }
     afe_iface_->feed(afe_data_, data.data());
 }
 
@@ -151,12 +156,23 @@ void AfeAudioProcessor::AudioProcessorTask() {
 
         if (output_callback_) {
             size_t samples = res->data_size / sizeof(int16_t);
-            
+            static int fetch_count = 0;
+            fetch_count++;
+            if (fetch_count <= 3 || fetch_count % 50 == 0) {
+                ESP_LOGI(TAG, "[AFE] Fetch #%d, %d samples, vad=%d",
+                         fetch_count, (int)samples, res->vad_state);
+            }
+
             // Add data to buffer
             output_buffer_.insert(output_buffer_.end(), res->data, res->data + samples);
             
             // Output complete frames when buffer has enough data
             while (output_buffer_.size() >= frame_samples_) {
+                static int output_count = 0;
+                output_count++;
+                if (output_count <= 3 || output_count % 50 == 0) {
+                    ESP_LOGI(TAG, "[AFE] Output #%d, frame=%d samples", output_count, (int)frame_samples_);
+                }
                 if (output_buffer_.size() == frame_samples_) {
                     // If buffer size equals frame size, move the entire buffer
                     output_callback_(std::move(output_buffer_));

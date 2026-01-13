@@ -37,6 +37,7 @@ private:
     LcdDisplay* display_;
 
     void InitializeAmplifier() {
+        ESP_LOGI(TAG, "Initializing MAX98357A amplifier on GPIO %d...", AUDIO_CODEC_PA_PIN);
         // Configure MAX98357A SD (shutdown) pin
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = BIT64(AUDIO_CODEC_PA_PIN);
@@ -44,10 +45,23 @@ private:
         io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.intr_type = GPIO_INTR_DISABLE;
-        gpio_config(&io_conf);
-        // Enable amplifier (HIGH = enabled)
-        gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
-        ESP_LOGI(TAG, "MAX98357A amplifier enabled on GPIO %d", AUDIO_CODEC_PA_PIN);
+        esp_err_t ret = gpio_config(&io_conf);
+        ESP_LOGI(TAG, "GPIO config result: %s", esp_err_to_name(ret));
+
+        // Enable amplifier (HIGH = enabled for MAX98357A SD pin)
+        ret = gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
+        ESP_LOGI(TAG, "GPIO set level result: %s", esp_err_to_name(ret));
+
+        // Verify GPIO state
+        int level = gpio_get_level(AUDIO_CODEC_PA_PIN);
+        ESP_LOGI(TAG, "MAX98357A SD pin (GPIO %d) = %d (should be 1)", AUDIO_CODEC_PA_PIN, level);
+
+        // Small delay for amplifier to stabilize
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "Amplifier enabled and ready");
+
+        // Generate test tone to verify speaker works
+        ESP_LOGI(TAG, "Playing test tone...");
     }
 
     void InitializeBacklightGpio() {
@@ -135,7 +149,7 @@ public:
     XamadS3DiyBoard() : boot_button_(BOOT_BUTTON_GPIO) {
         ESP_LOGI(TAG, "Initializing XAMAD ESP32-S3 DIY Board");
         InitializeBacklightGpio();
-        InitializeAmplifier();
+        // Don't init amplifier here - do it after audio codec is ready
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
@@ -162,7 +176,34 @@ public:
             AUDIO_I2S_MIC_GPIO_DIN,
             I2S_STD_SLOT_LEFT         // MIC slot - LEFT (INMP441 L/R=GND)
         );
-        ESP_LOGI(TAG, "Audio codec: SPK=LEFT, MIC=LEFT");
+
+        // Initialize amplifier AFTER I2S is configured
+        static bool amp_initialized = false;
+        if (!amp_initialized) {
+            ESP_LOGI(TAG, "Enabling MAX98357A amplifier AFTER I2S init...");
+
+            // Configure PA pin as output with push-pull
+            gpio_config_t io_conf = {};
+            io_conf.pin_bit_mask = BIT64(AUDIO_CODEC_PA_PIN);
+            io_conf.mode = GPIO_MODE_OUTPUT;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;  // Add pull-up
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            gpio_config(&io_conf);
+
+            // Set HIGH to enable amplifier
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
+            vTaskDelay(pdMS_TO_TICKS(50));
+
+            // Set again to be sure
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
+
+            ESP_LOGI(TAG, "MAX98357A amplifier enabled on GPIO %d", AUDIO_CODEC_PA_PIN);
+            ESP_LOGI(TAG, "Audio codec configured: SPK=LEFT, MIC=LEFT, out=%dHz, in=%dHz",
+                     AUDIO_OUTPUT_SAMPLE_RATE, AUDIO_INPUT_SAMPLE_RATE);
+            amp_initialized = true;
+        }
+
         return &audio_codec;
     }
 

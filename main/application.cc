@@ -220,10 +220,18 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
+            static int event_count = 0;
+            event_count++;
+            int sent = 0;
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                    ESP_LOGW(TAG, "SendAudio returned false, stopping send loop");
                     break;
                 }
+                sent++;
+            }
+            if (event_count <= 5 || event_count % 20 == 0) {
+                ESP_LOGI(TAG, "[APP] SEND_AUDIO event #%d, sent %d packets", event_count, sent);
             }
         }
 
@@ -909,18 +917,26 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
+            // Disable wake word detection during WebSocket connection to prevent
+            // AFE ring buffer overflow (fetch is blocked but AudioInputTask keeps feeding)
+            audio_service_.EnableWakeWordDetection(false);
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
 
-            // Make sure the audio processor is running
+            // Always restart voice processing when entering listening state
+            // This ensures proper state after transitions from speaking/connecting
+            ESP_LOGI(TAG, "Entering listening state, processor running: %d",
+                     audio_service_.IsAudioProcessorRunning());
+
+            // Send the start listening command if not already running
             if (!audio_service_.IsAudioProcessorRunning()) {
-                // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
-                audio_service_.EnableVoiceProcessing(true);
-                audio_service_.EnableWakeWordDetection(false);
             }
+            // Always enable voice processing to ensure proper state
+            audio_service_.EnableVoiceProcessing(true);
+            audio_service_.EnableWakeWordDetection(false);
 
             // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
             if (play_popup_on_listening_) {
@@ -933,8 +949,10 @@ void Application::HandleStateChangedEvent() {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
-                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+                // Keep wake word detection DISABLED during active conversation
+                // Re-enabling it here causes AudioInputTask to feed to wake word
+                // instead of being idle, interfering with transition to listening
+                audio_service_.EnableWakeWordDetection(false);
             }
             audio_service_.ResetDecoder();
             break;

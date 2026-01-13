@@ -1,6 +1,7 @@
 #include "no_audio_codec.h"
 
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <cmath>
 #include <cstring>
 
@@ -148,6 +149,11 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     duplex_ = false;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
+    data_bit_width_ = I2S_DATA_BIT_WIDTH_16BIT;  // Use 16-bit for MAX98357A
+
+    ESP_LOGI(TAG, "Creating simplex channels with 16-bit mode for speaker");
+    ESP_LOGI(TAG, "SPK: BCLK=%d, WS=%d, DOUT=%d, slot_mask=%d", spk_bclk, spk_ws, spk_dout, spk_slot_mask);
+    ESP_LOGI(TAG, "MIC: SCK=%d, WS=%d, DIN=%d, slot_mask=%d", mic_sck, mic_ws, mic_din, mic_slot_mask);
 
     // Create a new channel for speaker
     i2s_chan_config_t chan_cfg = {
@@ -161,7 +167,8 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     };
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
 
-    i2s_std_config_t std_cfg = {
+    // Speaker config - 16-bit mode for MAX98357A
+    i2s_std_config_t spk_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
@@ -172,11 +179,11 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
 
         },
         .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
             .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
             .slot_mode = I2S_SLOT_MODE_MONO,
             .slot_mask = spk_slot_mask,
-            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_width = I2S_DATA_BIT_WIDTH_16BIT,
             .ws_pol = false,
             .bit_shift = true,
             #ifdef   I2S_HW_VERSION_2
@@ -199,42 +206,158 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             }
         }
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &spk_cfg));
+    ESP_LOGI(TAG, "Speaker I2S channel initialized (16-bit mode)");
 
-    // Create a new channel for MIC
+    // Create a new channel for MIC - keep 32-bit for INMP441
     chan_cfg.id = (i2s_port_t)1;
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
-    std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
-    std_cfg.slot_cfg.slot_mask = mic_slot_mask;
-    std_cfg.gpio_cfg.bclk = mic_sck;
-    std_cfg.gpio_cfg.ws = mic_ws;
-    std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
-    std_cfg.gpio_cfg.din = mic_din;
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
-    ESP_LOGI(TAG, "Simplex channels created");
+
+    i2s_std_config_t mic_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)input_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2
+				.ext_clk_freq_hz = 0,
+			#endif
+
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = mic_slot_mask,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
+
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = mic_sck,
+            .ws = mic_ws,
+            .dout = I2S_GPIO_UNUSED,
+            .din = mic_din,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &mic_cfg));
+    ESP_LOGI(TAG, "Microphone I2S channel initialized (32-bit mode)");
+    ESP_LOGI(TAG, "Simplex channels created successfully");
 }
 
 int NoAudioCodec::Write(const int16_t* data, int samples) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
-    std::vector<int32_t> buffer(samples);
-
-    // output_volume_: 0-100
-    // volume_factor_: 0-65536
-    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
-    for (int i = 0; i < samples; i++) {
-        int64_t temp = int64_t(data[i]) * volume_factor; // 使用 int64_t 进行乘法运算
-        if (temp > INT32_MAX) {
-            buffer[i] = INT32_MAX;
-        } else if (temp < INT32_MIN) {
-            buffer[i] = INT32_MIN;
-        } else {
-            buffer[i] = static_cast<int32_t>(temp);
-        }
+    // Safety check
+    if (tx_handle_ == nullptr) {
+        ESP_LOGE(TAG, "Write called but tx_handle_ is NULL!");
+        return 0;
+    }
+    if (data == nullptr || samples <= 0) {
+        ESP_LOGE(TAG, "Write called with invalid data or samples");
+        return 0;
     }
 
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+
     size_t bytes_written;
-    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
-    return bytes_written / sizeof(int32_t);
+    esp_err_t ret;
+
+    // Debug: log first writes
+    static int write_count = 0;
+    if (write_count < 5) {
+        ESP_LOGI(TAG, "I2S Write: samples=%d, volume=%d, bit_width=%d",
+                 samples, output_volume_, (int)data_bit_width_);
+        write_count++;
+    }
+
+    if (data_bit_width_ == I2S_DATA_BIT_WIDTH_16BIT) {
+        // 16-bit mode for MAX98357A - write int16_t directly with volume scaling
+        int16_t* buffer = (int16_t*)heap_caps_malloc(samples * sizeof(int16_t), MALLOC_CAP_DEFAULT);
+        if (buffer == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate 16-bit audio buffer!");
+            return 0;
+        }
+
+        // Volume scaling: 0-100 -> 0.0-1.0 with exponential curve
+        float volume_scale = pow(float(output_volume_) / 100.0f, 2);
+
+        for (int i = 0; i < samples; i++) {
+            int32_t temp = int32_t(data[i]) * volume_scale;
+            if (temp > INT16_MAX) {
+                buffer[i] = INT16_MAX;
+            } else if (temp < INT16_MIN) {
+                buffer[i] = INT16_MIN;
+            } else {
+                buffer[i] = static_cast<int16_t>(temp);
+            }
+        }
+
+        ret = i2s_channel_write(tx_handle_, buffer, samples * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+        heap_caps_free(buffer);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "I2S 16-bit write failed: %s", esp_err_to_name(ret));
+            return 0;
+        }
+
+        // Debug: confirm bytes written
+        static int written_count_16 = 0;
+        if (written_count_16 < 5) {
+            ESP_LOGI(TAG, "I2S Written (16-bit): %d bytes to speaker", (int)bytes_written);
+            written_count_16++;
+        }
+
+        return bytes_written / sizeof(int16_t);
+    } else {
+        // 32-bit mode (original code path)
+        int32_t* buffer = (int32_t*)heap_caps_malloc(samples * sizeof(int32_t), MALLOC_CAP_DEFAULT);
+        if (buffer == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate 32-bit audio buffer!");
+            return 0;
+        }
+
+        // output_volume_: 0-100
+        // volume_factor_: 0-65536
+        int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+
+        for (int i = 0; i < samples; i++) {
+            int64_t temp = int64_t(data[i]) * volume_factor;
+            if (temp > INT32_MAX) {
+                buffer[i] = INT32_MAX;
+            } else if (temp < INT32_MIN) {
+                buffer[i] = INT32_MIN;
+            } else {
+                buffer[i] = static_cast<int32_t>(temp);
+            }
+        }
+
+        ret = i2s_channel_write(tx_handle_, buffer, samples * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+        heap_caps_free(buffer);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "I2S 32-bit write failed: %s", esp_err_to_name(ret));
+            return 0;
+        }
+
+        // Debug: confirm bytes written
+        static int written_count_32 = 0;
+        if (written_count_32 < 5) {
+            ESP_LOGI(TAG, "I2S Written (32-bit): %d bytes to speaker", (int)bytes_written);
+            written_count_32++;
+        }
+
+        return bytes_written / sizeof(int32_t);
+    }
 }
 
 int NoAudioCodec::Read(int16_t* dest, int samples) {

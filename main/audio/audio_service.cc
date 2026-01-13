@@ -87,12 +87,12 @@ void AudioService::Start() {
         vTaskDelete(NULL);
     }, "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 0);
 
-    /* Start the audio output task */
+    /* Start the audio output task - needs large stack for Write() buffer */
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 2, this, 4, &audio_output_task_handle_);
+    }, "audio_output", 2048 * 6, this, 4, &audio_output_task_handle_);
 #else
     /* Start the audio input task */
     xTaskCreate([](void* arg) {
@@ -101,12 +101,12 @@ void AudioService::Start() {
         vTaskDelete(NULL);
     }, "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
 
-    /* Start the audio output task */
+    /* Start the audio output task - needs large stack for Write() buffer */
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048, this, 4, &audio_output_task_handle_);
+    }, "audio_output", 2048 * 6, this, 4, &audio_output_task_handle_);
 #endif
 
     /* Start the opus codec task */
@@ -188,6 +188,7 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 }
 
 void AudioService::AudioInputTask() {
+    static int log_counter = 0;
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
             AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
@@ -197,9 +198,16 @@ void AudioService::AudioInputTask() {
             break;
         }
         if (audio_input_need_warmup_) {
+            ESP_LOGI(TAG, "AudioInputTask: warmup, bits=0x%lx", bits);
             audio_input_need_warmup_ = false;
             vTaskDelay(pdMS_TO_TICKS(120));
             continue;
+        }
+
+        // Log occasionally to avoid spam
+        if (++log_counter >= 100) {
+            ESP_LOGI(TAG, "AudioInputTask: bits=0x%lx", bits);
+            log_counter = 0;
         }
 
         /* Used for audio testing in NetworkConfiguring mode by clicking the BOOT button */
@@ -257,6 +265,7 @@ void AudioService::AudioInputTask() {
 }
 
 void AudioService::AudioOutputTask() {
+    ESP_LOGI(TAG, "AudioOutputTask started");
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_; });
@@ -266,10 +275,18 @@ void AudioService::AudioOutputTask() {
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+
+        static int task_count = 0;
+        if (task_count < 5) {
+            ESP_LOGI(TAG, "AudioOutputTask: got task with %d samples", (int)task->pcm.size());
+            task_count++;
+        }
+
         audio_queue_cv_.notify_all();
         lock.unlock();
 
         if (!codec_->output_enabled()) {
+            ESP_LOGI(TAG, "AudioOutputTask: enabling output");
             esp_timer_stop(audio_power_timer_);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
@@ -352,12 +369,22 @@ void AudioService::OpusCodecTask() {
             }
 
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
+                static int encode_count = 0;
+                encode_count++;
+                if (encode_count <= 5 || encode_count % 20 == 0) {
+                    ESP_LOGI(TAG, "==> Opus encoded #%d, payload=%d bytes", encode_count, (int)packet->payload.size());
+                }
                 {
                     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
                     audio_send_queue_.push_back(std::move(packet));
+                    if (encode_count <= 5) {
+                        ESP_LOGI(TAG, "    Send queue size now: %d", (int)audio_send_queue_.size());
+                    }
                 }
                 if (callbacks_.on_send_queue_available) {
                     callbacks_.on_send_queue_available();
+                } else {
+                    ESP_LOGW(TAG, "No callback for send queue!");
                 }
             } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex_);
@@ -387,10 +414,18 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
 }
 
 void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm) {
+    static int push_count = 0;
+    if (type == kAudioTaskTypeEncodeToSendQueue) {
+        push_count++;
+        if (push_count <= 3 || push_count % 50 == 0) {
+            ESP_LOGI(TAG, "[ENC] Queue push #%d, %d samples", push_count, (int)pcm.size());
+        }
+    }
+
     auto task = std::make_unique<AudioTask>();
     task->type = type;
     task->pcm = std::move(pcm);
-    
+
     /* Push the task to the encode queue */
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
 
@@ -475,7 +510,8 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 }
 
 void AudioService::EnableVoiceProcessing(bool enable) {
-    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+    ESP_LOGI(TAG, "%s voice processing, initialized=%d",
+             enable ? "Enabling" : "Disabling", audio_processor_initialized_);
     if (enable) {
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
@@ -487,9 +523,11 @@ void AudioService::EnableVoiceProcessing(bool enable) {
         audio_input_need_warmup_ = true;
         audio_processor_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        ESP_LOGI(TAG, "Voice processing enabled, event bits set");
     } else {
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        ESP_LOGI(TAG, "Voice processing disabled, event bits cleared");
     }
 }
 
@@ -670,6 +708,9 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
 
     if (wake_word_) {
         wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
+            // Immediately stop feeding audio to wake word AFE to prevent buffer overflow
+            // during the time between detection and state change to connecting
+            xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
             if (callbacks_.on_wake_word_detected) {
                 callbacks_.on_wake_word_detected(wake_word);
             }

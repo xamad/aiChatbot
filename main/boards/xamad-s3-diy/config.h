@@ -16,7 +16,7 @@
 
 // Audio Configuration
 #define AUDIO_INPUT_SAMPLE_RATE  16000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000  // Match server sample rate
 
 // Use separate I2S buses for mic and speaker
 #define AUDIO_I2S_METHOD_SIMPLEX

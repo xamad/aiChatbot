@@ -26,7 +26,13 @@ bool WebsocketProtocol::Start() {
 }
 
 bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
+    static int send_count = 0;
+    send_count++;
+    if (send_count <= 5 || send_count % 20 == 0) {
+        ESP_LOGI(TAG, ">>> SendAudio #%d, payload=%d bytes", send_count, (int)packet->payload.size());
+    }
     if (websocket_ == nullptr || !websocket_->IsConnected()) {
+        ESP_LOGW(TAG, "SendAudio FAILED: websocket not connected");
         return false;
     }
 
@@ -51,7 +57,11 @@ bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
         bp3->payload_size = htons(packet->payload.size());
         memcpy(bp3->payload, packet->payload.data(), packet->payload.size());
 
-        return websocket_->Send(serialized.data(), serialized.size(), true);
+        bool result = websocket_->Send(serialized.data(), serialized.size(), true);
+        if (!result) {
+            ESP_LOGE(TAG, "WebSocket Send FAILED for audio packet");
+        }
+        return result;
     } else {
         return websocket_->Send(packet->payload.data(), packet->payload.size(), true);
     }
@@ -180,9 +190,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     // Send hello message to describe the client
     auto message = GetHelloMessage();
+    ESP_LOGI(TAG, "Sending hello: %s", message.c_str());
     if (!SendText(message)) {
+        ESP_LOGE(TAG, "Failed to send hello message");
         return false;
     }
+    ESP_LOGI(TAG, "Hello sent successfully, waiting for server hello...");
 
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
