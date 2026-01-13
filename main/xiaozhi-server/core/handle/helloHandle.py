@@ -19,15 +19,15 @@ TAG = __name__
 WAKEUP_CONFIG = {
     "refresh_time": 10,
     "responses": [
-        "我一直都在呢，您请说。",
-        "在的呢，请随时吩咐我。",
-        "来啦来啦，请告诉我吧。",
-        "您请说，我正听着。",
-        "请您讲话，我准备好了。",
-        "请您说出指令吧。",
-        "我认真听着呢，请讲。",
-        "请问您需要什么帮助？",
-        "我在这里，等候您的指令。",
+        "Sono qui, dimmi pure.",
+        "Eccomi, come posso aiutarti?",
+        "Sì, ti ascolto.",
+        "Dimmi, sono pronta.",
+        "Come posso esserti utile?",
+        "Sono a tua disposizione.",
+        "Ti ascolto, parla pure.",
+        "Certo, dimmi cosa ti serve.",
+        "Eccomi qua, pronta ad aiutarti.",
     ],
 }
 
@@ -40,12 +40,19 @@ _wakeup_response_lock = asyncio.Lock()
 
 async def handleHelloMessage(conn, msg_json):
     """处理hello消息"""
-    audio_params = msg_json.get("audio_params")
-    if audio_params:
-        format = audio_params.get("format")
+    # Store client's protocol version for binary message handling
+    conn.client_protocol_version = msg_json.get("version", 1)
+    conn.logger.bind(tag=TAG).debug(f"Client protocol version: {conn.client_protocol_version}")
+
+    # Client's audio_params (what client SENDS - microphone settings)
+    client_audio_params = msg_json.get("audio_params")
+    if client_audio_params:
+        format = client_audio_params.get("format")
         conn.logger.bind(tag=TAG).debug(f"客户端音频格式: {format}")
         conn.audio_format = format
-        conn.welcome_msg["audio_params"] = audio_params
+        # Store client's mic params but DON'T overwrite server's TTS params
+        conn.client_audio_params = client_audio_params
+        # Server's audio_params stay as configured (24kHz for TTS output)
     features = msg_json.get("features")
     if features:
         conn.logger.bind(tag=TAG).debug(f"客户端特性: {features}")
@@ -58,6 +65,7 @@ async def handleHelloMessage(conn, msg_json):
             # 发送mcp消息，获取tools列表
             asyncio.create_task(send_mcp_tools_list_request(conn))
 
+    conn.logger.bind(tag=TAG).info(f"Server hello response: {json.dumps(conn.welcome_msg)}")
     await conn.websocket.send(json.dumps(conn.welcome_msg))
 
 
@@ -79,7 +87,9 @@ async def checkWakeupWords(conn, text):
         return False
 
     _, filtered_text = remove_punctuation_and_length(text)
-    if filtered_text not in conn.config.get("wakeup_words"):
+    # Case-insensitive wake word check
+    wakeup_words = conn.config.get("wakeup_words", [])
+    if filtered_text.lower() not in [w.lower() for w in wakeup_words]:
         return False
 
     conn.just_woken_up = True
@@ -97,7 +107,7 @@ async def checkWakeupWords(conn, text):
             "voice": "default",
             "file_path": "config/assets/wakeup_words_short.wav",
             "time": 0,
-            "text": "我在这里哦！",
+            "text": "Sono qui!",
         }
 
     # 获取音频数据
@@ -141,7 +151,7 @@ async def wakeupWordsResponse(conn):
         # 获取当前音色
         voice = getattr(conn.tts, "voice", "default")
 
-        wav_bytes = opus_datas_to_wav_bytes(tts_result, sample_rate=16000)
+        wav_bytes = opus_datas_to_wav_bytes(tts_result, sample_rate=24000)
         file_path = wakeup_words_config.generate_file_path(voice)
         with open(file_path, "wb") as f:
             f.write(wav_bytes)

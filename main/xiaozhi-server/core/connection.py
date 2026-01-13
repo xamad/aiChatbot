@@ -186,6 +186,14 @@ class ConnectionHandler:
 
             self.device_id = self.headers.get("device-id", None)
 
+            # Pulisci eventuali sessioni di traduzione residue da connessioni precedenti
+            if self.device_id:
+                try:
+                    from plugins_func.functions.traduttore_realtime import clear_translation_session
+                    clear_translation_session(self.device_id)
+                except ImportError:
+                    pass
+
             # 认证通过,继续处理
             self.websocket = ws
 
@@ -317,8 +325,18 @@ class ConnectionHandler:
                 if handled:
                     return
 
-            # 不需要头部处理或没有头部时，直接处理原始消息
-            self.asr_audio_queue.put(message)
+            # Protocol V3: strip 4-byte header from incoming audio
+            # Header: [type: 1 byte][reserved: 1 byte][payload_size: 2 bytes BE]
+            # Use CLIENT's protocol version (C3 mini = v1, XAMAD S3 = v3)
+            client_version = getattr(self, 'client_protocol_version', 1)
+            if client_version >= 3 and len(message) >= 4:
+                # Extract audio payload (skip 4-byte header)
+                audio_data = message[4:]
+                if len(audio_data) > 0:
+                    self.asr_audio_queue.put(audio_data)
+            else:
+                # Protocol V1/V2: raw audio without header
+                self.asr_audio_queue.put(message)
 
     async def _process_mqtt_audio_message(self, message):
         """

@@ -261,8 +261,8 @@ def audio_to_data_stream(
         audio_file_path, format=file_type, parameters=["-nostdin"]
     )
 
-    # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
-    audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+    # 转换为单声道/24kHz采样率/16位小端编码（确保与编码器匹配）
+    audio = audio.set_channels(1).set_frame_rate(24000).set_sample_width(2)
 
     # 获取原始PCM数据（16位小端）
     raw_data = audio.raw_data
@@ -301,18 +301,22 @@ async def audio_to_data(
             audio_file_path, format=file_type, parameters=["-nostdin"]
         )
 
-        # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
-        audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+        # 转换为单声道/24kHz采样率/16位小端编码（确保与编码器匹配）
+        audio = audio.set_channels(1).set_frame_rate(24000).set_sample_width(2)
 
         # 获取原始PCM数据（16位小端）
         raw_data = audio.raw_data
 
-        # 初始化Opus编码器
-        encoder = opuslib_next.Encoder(16000, 1, opuslib_next.APPLICATION_AUDIO)
+        # 初始化Opus编码器 (24kHz, mono, AUDIO for quality)
+        encoder = opuslib_next.Encoder(24000, 1, opuslib_next.APPLICATION_AUDIO)
+        # Fullband mode for 24kHz output
+        encoder.bandwidth = opuslib_next.BANDWIDTH_FULLBAND
+        # Disable DTX to avoid small silence frames
+        encoder.dtx = False
 
-        # 编码参数
+        # 编码参数: 60ms frame = 1440 samples at 24kHz
         frame_duration = 60  # 60ms per frame
-        frame_size = int(16000 * frame_duration / 1000)  # 960 samples/frame
+        frame_size = int(24000 * frame_duration / 1000)  # 1440 samples/frame
 
         datas = []
         # 按帧处理所有音频数据（包括最后一帧可能补零）
@@ -361,18 +365,22 @@ def audio_bytes_to_data_stream(
         audio = AudioSegment.from_file(
             BytesIO(audio_bytes), format=file_type, parameters=["-nostdin"]
         )
-        audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+        audio = audio.set_channels(1).set_frame_rate(24000).set_sample_width(2)
         raw_data = audio.raw_data
         pcm_to_data_stream(raw_data, is_opus, callback)
 
 
 def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = None):
-    # 初始化Opus编码器
-    encoder = opuslib_next.Encoder(16000, 1, opuslib_next.APPLICATION_AUDIO)
+    # 初始化Opus编码器 (24kHz, mono, AUDIO for quality)
+    encoder = opuslib_next.Encoder(24000, 1, opuslib_next.APPLICATION_AUDIO)
+    # Fullband mode for 24kHz output
+    encoder.bandwidth = opuslib_next.BANDWIDTH_FULLBAND
+    # Disable DTX to avoid small silence frames
+    encoder.dtx = False
 
-    # 编码参数
+    # 编码参数: 60ms frame = 1440 samples at 24kHz
     frame_duration = 60  # 60ms per frame
-    frame_size = int(16000 * frame_duration / 1000)  # 960 samples/frame
+    frame_size = int(24000 * frame_duration / 1000)  # 1440 samples/frame
 
     # 按帧处理所有音频数据（包括最后一帧可能补零）
     for i in range(0, len(raw_data), frame_size * 2):  # 16bit=2bytes/sample
@@ -394,7 +402,7 @@ def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = 
             callback(frame_data)
 
 
-def opus_datas_to_wav_bytes(opus_datas, sample_rate=16000, channels=1):
+def opus_datas_to_wav_bytes(opus_datas, sample_rate=24000, channels=1):
     """
     将opus帧列表解码为wav字节流
     """
@@ -402,8 +410,8 @@ def opus_datas_to_wav_bytes(opus_datas, sample_rate=16000, channels=1):
     try:
         pcm_datas = []
 
-        frame_duration = 60  # ms
-        frame_size = int(sample_rate * frame_duration / 1000)  # 960
+        frame_duration = 60  # ms (60ms at 24kHz = 1440 samples)
+        frame_size = int(sample_rate * frame_duration / 1000)  # 1440
 
         for opus_frame in opus_datas:
             # 解码为PCM（返回bytes，2字节/采样点）

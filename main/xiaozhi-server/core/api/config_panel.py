@@ -77,17 +77,21 @@ MODELLI_DISPONIBILI = {
 }
 
 # Categorie funzioni - nomi corrispondenti ai file in plugins_func/functions/
+# NOTA: get_weather, get_time, get_news_* sono legacy cinesi - usare meteo_italia, notizie_italia
 CATEGORIE_FUNZIONI = {
-    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "podcast_italia", "karaoke", "play_music", "beatbox_umano"]},
-    "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno", "get_time", "get_weather"]},
-    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "barzelletta_bambini", "barzelletta_adulti", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
+    "media": {"nome": "Media & Audio", "icon": "🎵", "funzioni": ["radio_italia", "radio_downloader", "podcast_italia", "karaoke", "play_music", "cerca_musica", "cerca_musica_web"]},
+    "display": {"nome": "Display & Visuale", "icon": "🖼️", "funzioni": ["cerca_immagini", "cerca_gif"]},
+    "info": {"nome": "Informazioni", "icon": "📰", "funzioni": ["meteo_italia", "notizie_italia", "oroscopo", "lotto_estrazioni", "accadde_oggi", "santo_del_giorno", "get_time", "get_weather", "get_news_from_newsnow", "get_news_from_chinanews"]},
+    "intrattenimento": {"nome": "Intrattenimento", "icon": "🎭", "funzioni": ["barzellette", "quiz_trivia", "storie_bambini", "curiosita", "proverbi_italiani", "frase_del_giorno", "genera_rime", "oracolo"]},
     "giochi": {"nome": "Giochi", "icon": "🎮", "funzioni": ["impiccato", "battaglia_navale", "venti_domande", "cruciverba_vocale", "chi_vuol_essere", "dado", "memory_vocale", "allenamento_mentale"]},
-    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore_realtime", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale", "memoria_personale", "ricordami", "cosa_ricordi"]},
-    "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "shopping_vocale"]},
+    "utility": {"nome": "Utilità", "icon": "🛠️", "funzioni": ["timer_sveglia", "promemoria", "promemoria_farmaci", "calcolatrice", "convertitore", "traduttore", "traduttore_realtime", "lista_spesa", "shopping_vocale", "note_vocali", "rubrica_vocale", "agenda_eventi", "chi_sono", "diario_vocale", "memoria_personale", "user_memory"]},
+    "casa": {"nome": "Casa Smart", "icon": "🏠", "funzioni": ["domotica", "smart_fridge", "hass_get_state", "hass_set_state", "hass_play_music", "hass_init"]},
+    "mesh": {"nome": "Mesh & IoT", "icon": "📡", "funzioni": ["meshtastic_lora"]},
     "benessere": {"nome": "Benessere", "icon": "🧘", "funzioni": ["meditazione", "supporto_emotivo", "compagno_notturno", "compagno_antisolitudine", "check_benessere", "ginnastica_dolce", "conta_acqua", "diario_umore", "routine_mattutina", "briefing_mattutino", "suoni_ambiente"]},
-    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata", "cambia_profilo"]},
+    "special": {"nome": "Speciali", "icon": "⭐", "funzioni": ["giannino_easter_egg", "osterie_goliardiche", "versi_animali", "personalita_multiple", "easter_egg_folli", "sommario_funzioni", "intrattenitore_anziani", "complimenti", "chiacchierata", "cambia_profilo", "aiuto_profilo", "change_role"]},
     "guide": {"nome": "Guide", "icon": "🗺️", "funzioni": ["guida_turistica", "guida_ristoranti", "ricette", "ricette_ingredienti", "cooking_companion", "numeri_utili", "sos_emergenza", "emergenza_rapida"]},
-    "ricerca": {"nome": "Ricerca & AI", "icon": "🤖", "funzioni": ["web_search", "leggi_pagina", "risposta_ai"]},
+    "ricerca": {"nome": "Ricerca & AI", "icon": "🤖", "funzioni": ["web_search", "leggi_pagina", "risposta_ai", "search_from_ragflow"]},
+    "sistema": {"nome": "Sistema", "icon": "⚙️", "funzioni": ["handle_exit_intent"]},
 }
 
 def get_available_functions():
@@ -526,7 +530,11 @@ HTML_TEMPLATE = '''
         <div class="nav-item" onclick="showSection('model')">🧠 Modello AI</div>
         <div class="nav-item" onclick="showSection('functions')">⚡ Funzioni</div>
         <div class="nav-item" onclick="showSection('identity')">👤 Identità</div>
+        <div class="nav-item" onclick="showSection('audio')">🔊 Audio/Protocol</div>
         <div class="nav-item" onclick="showSection('eastereggs')">🥚 Easter Eggs</div>
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border);">
+            <a href="/debug/logs" class="nav-item" style="text-decoration: none;">📋 Debug Logs</a>
+        </div>
     </nav>
 
     <main class="main">
@@ -626,6 +634,74 @@ HTML_TEMPLATE = '''
                     <div class="form-group">
                         <label>Personalità / Prompt di sistema</label>
                         <textarea id="descrizione" name="descrizione" placeholder="Descrivi come deve comportarsi il chatbot...">DESCRIZIONE</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AUDIO/PROTOCOL -->
+            <div id="section-audio" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🔊 Configurazione Audio & Protocollo</div>
+                    </div>
+                    <p style="color: var(--text-muted); margin-bottom: 20px;">
+                        Impostazioni del protocollo WebSocket e formato audio. Queste impostazioni
+                        vengono negoziate automaticamente con il dispositivo durante la connessione.
+                    </p>
+
+                    <div class="grid-2">
+                        <div class="card" style="background: var(--bg-dark); margin-bottom: 0;">
+                            <div class="card-title" style="margin-bottom: 15px;">📤 Server → Device (TTS Output)</div>
+                            <div class="form-group">
+                                <label>Sample Rate</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--accent);">AUDIO_SAMPLE_RATE Hz</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Frame Duration</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--accent);">AUDIO_FRAME_DURATION ms</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Formato</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--accent);">AUDIO_FORMAT</div>
+                            </div>
+                        </div>
+
+                        <div class="card" style="background: var(--bg-dark); margin-bottom: 0;">
+                            <div class="card-title" style="margin-bottom: 15px;">📥 Device → Server (ASR Input)</div>
+                            <div class="form-group">
+                                <label>Sample Rate</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--success);">16000 Hz</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Frame Duration</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--success);">60 ms</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Formato</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--success);">Opus</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="background: var(--bg-dark); margin-top: 20px;">
+                        <div class="card-title" style="margin-bottom: 15px;">📡 Protocollo WebSocket</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Versione Protocollo Server</label>
+                                <div style="font-size: 1.2em; font-weight: 600; color: var(--warning);">PROTOCOL_VERSION</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Formato Binario</label>
+                                <div style="font-size: 0.9em; color: var(--text-muted);">
+                                    <strong>V3:</strong> [type:1][reserved:1][size:2BE][opus]<br>
+                                    <strong>V1:</strong> [opus raw]
+                                </div>
+                            </div>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85em; margin-top: 15px;">
+                            ℹ️ Il server rileva automaticamente la versione del protocollo dal messaggio hello del client.
+                            C3 mini usa V1 (audio raw), XAMAD S3 DIY usa V3 (con header 4 byte).
+                        </p>
                     </div>
                 </div>
             </div>
@@ -921,6 +997,23 @@ async def config_panel_handler(request):
     html = html.replace("GIANNINO_VAR3", varianti[2] if len(varianti) > 2 else "")
     html = html.replace("GIANNINO_VAR4", varianti[3] if len(varianti) > 3 else "")
 
+    # Audio/Protocol settings from xiaozhi config
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        xiaozhi_config = config.get("xiaozhi", {})
+        audio_params = xiaozhi_config.get("audio_params", {})
+        html = html.replace("AUDIO_SAMPLE_RATE", str(audio_params.get("sample_rate", 24000)))
+        html = html.replace("AUDIO_FRAME_DURATION", str(audio_params.get("frame_duration", 60)))
+        html = html.replace("AUDIO_FORMAT", audio_params.get("format", "opus").upper())
+        html = html.replace("PROTOCOL_VERSION", f"V{xiaozhi_config.get('version', 1)}")
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore lettura config audio: {e}")
+        html = html.replace("AUDIO_SAMPLE_RATE", "24000")
+        html = html.replace("AUDIO_FRAME_DURATION", "60")
+        html = html.replace("AUDIO_FORMAT", "OPUS")
+        html = html.replace("PROTOCOL_VERSION", "V3")
+
     return web.Response(text=html, content_type='text/html')
 
 async def config_save_handler(request):
@@ -967,8 +1060,456 @@ async def config_save_handler(request):
             "message": f"Errore: {str(e)}"
         })
 
+LOG_FILE_PATH = str(_BASE_DIR / "tmp" / "server.log")
+
+# Debug Log Viewer HTML Template
+DEBUG_LOG_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xiaozhi Debug Logs</title>
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-card: #161b22;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --danger: #f85149;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --border: #30363d;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .logo {
+            font-size: 1.3em;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo span { color: var(--accent); }
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: var(--border);
+            border-color: var(--accent);
+        }
+        .btn.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+        .btn-danger { border-color: var(--danger); }
+        .btn-danger:hover { background: var(--danger); color: #fff; }
+        .filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .filter-input {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-dark);
+            color: var(--text);
+            font-size: 13px;
+            width: 200px;
+        }
+        .filter-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        select.filter-input {
+            width: auto;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            padding: 10px 25px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .stat-label { color: var(--text-muted); }
+        .stat-value { font-weight: 600; }
+        .stat-value.info { color: var(--accent); }
+        .stat-value.debug { color: var(--text-muted); }
+        .stat-value.warning { color: var(--warning); }
+        .stat-value.error { color: var(--danger); }
+        .log-container {
+            padding: 15px;
+            height: calc(100vh - 130px);
+            overflow-y: auto;
+        }
+        .log-line {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 2px;
+        }
+        .log-line:hover {
+            background: var(--bg-card);
+        }
+        .log-line.info { border-left: 3px solid var(--accent); }
+        .log-line.debug { border-left: 3px solid var(--text-muted); color: var(--text-muted); }
+        .log-line.warning { border-left: 3px solid var(--warning); background: rgba(210, 153, 34, 0.1); }
+        .log-line.error { border-left: 3px solid var(--danger); background: rgba(248, 81, 73, 0.1); }
+        .log-time { color: var(--text-muted); }
+        .log-tag { color: var(--accent); }
+        .log-level { font-weight: 600; padding: 1px 6px; border-radius: 3px; font-size: 10px; }
+        .log-level.INFO { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
+        .log-level.DEBUG { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+        .log-level.WARNING { background: rgba(210, 153, 34, 0.3); color: var(--warning); }
+        .log-level.ERROR { background: rgba(248, 81, 73, 0.3); color: var(--danger); }
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: var(--text-muted);
+        }
+        .empty-state .icon { font-size: 3em; margin-bottom: 15px; }
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+        }
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+        .connection-dot.connected { background: var(--success); animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .back-link {
+            color: var(--accent);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <a href="/config" class="back-link">← Config</a>
+            <span>|</span>
+            <span>🔍</span> Debug Logs
+        </div>
+        <div class="filters">
+            <input type="text" class="filter-input" id="searchFilter" placeholder="Cerca nei log...">
+            <select class="filter-input" id="levelFilter">
+                <option value="">Tutti i livelli</option>
+                <option value="ERROR">Solo ERROR</option>
+                <option value="WARNING">Solo WARNING</option>
+                <option value="INFO">Solo INFO</option>
+                <option value="DEBUG">Solo DEBUG</option>
+            </select>
+        </div>
+        <div class="controls">
+            <div class="connection-status">
+                <div class="connection-dot" id="connectionDot"></div>
+                <span id="connectionText">Disconnesso</span>
+            </div>
+            <button class="btn" id="autoScrollBtn" onclick="toggleAutoScroll()">
+                <span>📜</span> Auto-scroll
+            </button>
+            <button class="btn" id="pauseBtn" onclick="togglePause()">
+                <span>⏸️</span> Pausa
+            </button>
+            <button class="btn btn-danger" onclick="clearLogs()">
+                <span>🗑️</span> Pulisci
+            </button>
+        </div>
+    </header>
+
+    <div class="stats">
+        <div class="stat">
+            <span class="stat-label">Totale:</span>
+            <span class="stat-value" id="totalCount">0</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Info:</span>
+            <span class="stat-value info" id="infoCount">0</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Debug:</span>
+            <span class="stat-value debug" id="debugCount">0</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Warning:</span>
+            <span class="stat-value warning" id="warningCount">0</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Error:</span>
+            <span class="stat-value error" id="errorCount">0</span>
+        </div>
+    </div>
+
+    <div class="log-container" id="logContainer">
+        <div class="empty-state">
+            <div class="icon">📋</div>
+            <p>Caricamento log in corso...</p>
+        </div>
+    </div>
+
+    <script>
+        let logs = [];
+        let autoScroll = true;
+        let paused = false;
+        let lastPosition = 0;
+        let pollInterval = null;
+        const MAX_LOGS = 2000;
+
+        const container = document.getElementById('logContainer');
+        const searchFilter = document.getElementById('searchFilter');
+        const levelFilter = document.getElementById('levelFilter');
+
+        function parseLogLine(line) {
+            // Format: 2026-01-11 17:33:47 - 0.8.10_xxx - tag - LEVEL - tag - message
+            const match = line.match(/^(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) - ([^ ]+) - ([^ ]+) - (DEBUG|INFO|WARNING|ERROR) - [^ ]+ - (.*)$/);
+            if (match) {
+                return {
+                    time: match[1],
+                    version: match[2],
+                    tag: match[3],
+                    level: match[4],
+                    message: match[5],
+                    raw: line
+                };
+            }
+            // Fallback: try to detect level from line content
+            let level = 'INFO';
+            if (line.includes(' - ERROR - ') || line.includes('ERROR')) level = 'ERROR';
+            else if (line.includes(' - WARNING - ') || line.includes('WARNING')) level = 'WARNING';
+            else if (line.includes(' - DEBUG - ')) level = 'DEBUG';
+            return { raw: line, level: level };
+        }
+
+        function renderLog(log) {
+            const div = document.createElement('div');
+            const levelClass = (log.level || 'INFO').toLowerCase();
+            div.className = 'log-line ' + levelClass;
+
+            if (log.time) {
+                div.innerHTML = `<span class="log-time">${log.time}</span> ` +
+                    `<span class="log-level ${log.level}">${log.level}</span> ` +
+                    `<span class="log-tag">[${log.tag}]</span> ${escapeHtml(log.message)}`;
+            } else {
+                div.textContent = log.raw;
+            }
+            return div;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function filterLogs() {
+            const search = searchFilter.value.toLowerCase();
+            const level = levelFilter.value;
+
+            return logs.filter(log => {
+                if (level && log.level !== level) return false;
+                if (search && !log.raw.toLowerCase().includes(search)) return false;
+                return true;
+            });
+        }
+
+        function renderLogs() {
+            const filtered = filterLogs();
+            container.innerHTML = '';
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>Nessun log trovato</p></div>';
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            filtered.forEach(log => fragment.appendChild(renderLog(log)));
+            container.appendChild(fragment);
+
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+
+            updateStats();
+        }
+
+        function updateStats() {
+            const counts = { INFO: 0, DEBUG: 0, WARNING: 0, ERROR: 0 };
+            logs.forEach(log => {
+                if (counts[log.level] !== undefined) counts[log.level]++;
+            });
+
+            document.getElementById('totalCount').textContent = logs.length;
+            document.getElementById('infoCount').textContent = counts.INFO;
+            document.getElementById('debugCount').textContent = counts.DEBUG;
+            document.getElementById('warningCount').textContent = counts.WARNING;
+            document.getElementById('errorCount').textContent = counts.ERROR;
+        }
+
+        async function fetchLogs() {
+            if (paused) return;
+
+            try {
+                const response = await fetch('/debug/logs/stream?position=' + lastPosition);
+                const data = await response.json();
+
+                document.getElementById('connectionDot').classList.add('connected');
+                document.getElementById('connectionText').textContent = 'Connesso';
+
+                if (data.lines && data.lines.length > 0) {
+                    data.lines.forEach(line => {
+                        if (line.trim()) {
+                            logs.push(parseLogLine(line));
+                        }
+                    });
+
+                    // Limita numero log
+                    if (logs.length > MAX_LOGS) {
+                        logs = logs.slice(-MAX_LOGS);
+                    }
+
+                    lastPosition = data.position;
+                    renderLogs();
+                }
+            } catch (err) {
+                document.getElementById('connectionDot').classList.remove('connected');
+                document.getElementById('connectionText').textContent = 'Errore connessione';
+                console.error('Fetch error:', err);
+            }
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollBtn').classList.toggle('active', autoScroll);
+        }
+
+        function togglePause() {
+            paused = !paused;
+            const btn = document.getElementById('pauseBtn');
+            btn.classList.toggle('active', paused);
+            btn.innerHTML = paused ? '<span>▶️</span> Riprendi' : '<span>⏸️</span> Pausa';
+        }
+
+        function clearLogs() {
+            logs = [];
+            renderLogs();
+        }
+
+        searchFilter.addEventListener('input', renderLogs);
+        levelFilter.addEventListener('change', renderLogs);
+
+        // Start polling
+        fetchLogs();
+        pollInterval = setInterval(fetchLogs, 1000);
+
+        // Initial state
+        document.getElementById('autoScrollBtn').classList.add('active');
+    </script>
+</body>
+</html>
+'''
+
+async def debug_log_handler(request):
+    """Handler per la pagina debug log viewer"""
+    if not check_auth(request):
+        return auth_required()
+    return web.Response(text=DEBUG_LOG_TEMPLATE, content_type='text/html')
+
+async def debug_log_stream_handler(request):
+    """Handler per streaming log (polling)"""
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    try:
+        position = int(request.query.get('position', 0))
+        lines = []
+        new_position = position
+
+        if os.path.exists(LOG_FILE_PATH):
+            with open(LOG_FILE_PATH, 'r', encoding='utf-8', errors='ignore') as f:
+                f.seek(0, 2)  # Fine file
+                file_size = f.tell()
+
+                if position == 0:
+                    # Prima richiesta: ultimi 100KB
+                    start = max(0, file_size - 100000)
+                    f.seek(start)
+                    if start > 0:
+                        f.readline()  # Salta linea parziale
+                else:
+                    f.seek(position)
+
+                lines = f.readlines()
+                new_position = f.tell()
+
+        return web.json_response({
+            "lines": lines[-500:] if len(lines) > 500 else lines,  # Max 500 righe per request
+            "position": new_position
+        })
+
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Errore lettura log: {e}")
+        return web.json_response({"error": str(e), "lines": [], "position": 0})
+
 def setup_config_routes(app):
     """Configura le route per il pannello"""
     app.router.add_get('/config', config_panel_handler)
     app.router.add_post('/config/save', config_save_handler)
+    # Debug log viewer
+    app.router.add_get('/debug/logs', debug_log_handler)
+    app.router.add_get('/debug/logs/stream', debug_log_stream_handler)
     logger.bind(tag=TAG).info("Pannello configurazione attivo su /config")

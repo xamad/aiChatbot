@@ -19,10 +19,10 @@ WEB_SEARCH_FUNCTION_DESC = {
     "function": {
         "name": "web_search",
         "description": (
-            "搜索网络信息 / Cerca informazioni sul web in tempo reale. "
-            "当用户询问最新信息、新闻、价格、当前事件时使用此功能。"
-            "Use when user asks: 'cerca su google', 'cerca su internet', 'cerca online', "
-            "'google...', 'search...', 'cerca...', 'qual è il prezzo di...', 'cosa è successo...'"
+            "Cerca informazioni sul web in tempo reale. "
+            "Usare quando: 'cerca su internet', 'cerca online', 'cercami', 'trova', "
+            "'qual è il prezzo di', 'cosa è successo', 'ultime notizie su', "
+            "'dimmi di più su', 'informazioni su', 'ricerca web', 'cerca sul web'"
         ),
         "parameters": {
             "type": "object",

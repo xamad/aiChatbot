@@ -15,10 +15,9 @@ LEGGI_PAGINA_FUNCTION_DESC = {
     "function": {
         "name": "leggi_pagina",
         "description": (
-            "读取网页内容 / Legge il contenuto di una pagina web e lo riassume. "
-            "当用户想要了解更多关于搜索结果的信息时使用。"
-            "Use when user asks: 'leggi il primo link', 'approfondisci', 'apri quel sito', "
-            "'dimmi di più sul primo risultato', 'leggi la pagina', 'cosa dice quel sito'"
+            "Legge il contenuto di una pagina web e lo riassume. "
+            "Usare quando: 'leggi il primo link', 'approfondisci', 'apri quel sito', "
+            "'dimmi di più sul risultato', 'leggi la pagina', 'cosa dice quel sito'"
         ),
         "parameters": {
             "type": "object",

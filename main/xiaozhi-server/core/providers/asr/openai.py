@@ -15,9 +15,11 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.NON_STREAM
         self.api_key = config.get("api_key")
         self.api_url = config.get("base_url")
-        self.model = config.get("model_name")        
+        self.model = config.get("model_name")
         self.output_dir = config.get("output_dir")
         self.delete_audio_file = delete_audio_file
+        # Language parameter for Whisper API (ISO-639-1 format: it, en, zh, etc.)
+        self.language = config.get("language")
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -40,10 +42,13 @@ class ASRProvider(ASRProviderBase):
                 "Authorization": f"Bearer {self.api_key}",
             }
             
-            # 使用data参数传递模型名称
+            # 使用data参数传递模型名称和语言
             data = {
                 "model": self.model
             }
+            # Add language parameter if specified (improves recognition accuracy)
+            if self.language:
+                data["language"] = self.language
 
 
             with open(file_path, "rb") as audio_file:  # 使用with语句确保文件关闭

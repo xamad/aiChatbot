@@ -228,6 +228,12 @@ class OTAHandler(BaseHandler):
                 "firmware": {
                     "version": device_version,
                     "url": "",
+                    "force": 0,
+                },
+                "websocket": {
+                    "url": "",
+                    "token": "",
+                    "version": 3,
                 },
             }
 
@@ -292,6 +298,7 @@ class OTAHandler(BaseHandler):
                 return_json["websocket"] = {
                     "url": self._get_websocket_url(local_ip, websocket_port),
                     "token": token,
+                    "version": 3,
                 }
                 self.logger.bind(tag=TAG).info(
                     f"未配置MQTT网关，为设备 {device_id} 下发WebSocket配置"

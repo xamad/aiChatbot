@@ -28,17 +28,48 @@ class Action(Enum):
     NONE = (1, "啥也不干")
     RESPONSE = (2, "直接回复")
     REQLLM = (3, "调用函数后再请求llm生成回复")
+    CONTINUE = (4, "Multi-turn: risponde e mantiene sessione attiva per follow-up")
 
     def __init__(self, code, message):
         self.code = code
         self.message = message
 
 
+# Active multi-turn sessions per device
+# Format: {device_id: {"function": "function_name", "context": {}}}
+ACTIVE_SESSIONS = {}
+
+
 class ActionResponse:
-    def __init__(self, action: Action, result=None, response=None):
+    def __init__(self, action: Action, result=None, response=None, session_context=None):
         self.action = action  # 动作类型
         self.result = result  # 动作产生的结果
         self.response = response  # 直接回复的内容
+        self.session_context = session_context  # Context for multi-turn sessions
+
+
+def get_active_session(device_id: str) -> dict:
+    """Get active multi-turn session for device"""
+    return ACTIVE_SESSIONS.get(device_id)
+
+
+def set_active_session(device_id: str, function_name: str, context: dict = None):
+    """Set active multi-turn session for device"""
+    ACTIVE_SESSIONS[device_id] = {
+        "function": function_name,
+        "context": context or {}
+    }
+
+
+def clear_active_session(device_id: str):
+    """Clear active multi-turn session for device"""
+    if device_id in ACTIVE_SESSIONS:
+        del ACTIVE_SESSIONS[device_id]
+
+
+def is_session_active(device_id: str) -> bool:
+    """Check if device has active multi-turn session"""
+    return device_id in ACTIVE_SESSIONS
 
 
 class FunctionItem:

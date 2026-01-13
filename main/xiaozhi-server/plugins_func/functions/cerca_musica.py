@@ -25,10 +25,9 @@ CERCA_MUSICA_FUNCTION_DESC = {
     "function": {
         "name": "cerca_musica",
         "description": (
-            "搜索并播放YouTube音乐 / Cerca e riproduce musica da YouTube. "
-            "当用户想听特定歌曲时使用。"
-            "Use when: 'suona...', 'metti la canzone...', 'cerca e suona...', "
-            "'voglio ascoltare...', 'play music...', 'fammi sentire...'"
+            "Cerca e riproduce musica da YouTube. "
+            "Usare quando: 'suona', 'metti la canzone', 'fammi sentire', "
+            "'voglio ascoltare', 'cerca la canzone', 'metti musica di'"
         ),
         "parameters": {
             "type": "object",

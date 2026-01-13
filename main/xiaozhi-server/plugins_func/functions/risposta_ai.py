@@ -15,17 +15,19 @@ RISPOSTA_AI_FUNCTION_DESC = {
     "function": {
         "name": "risposta_ai",
         "description": (
-            "AI智能回答 / Risponde a domande generiche usando l'AI (Groq LLM). "
-            "Per domande di cultura generale, spiegazioni, definizioni, confronti. "
-            "Use when: 'cos'è', 'chi è', 'cosa significa', 'spiegami', 'come funziona', "
-            "'perché', 'qual è la differenza', 'descrivi', 'parlami di'"
+            "FALLBACK - Solo per domande INFORMATIVE senza azione da compiere. "
+            "NON USARE MAI SE l'utente dice: 'cerca', 'mostra', 'metti', 'accendi', 'fammi vedere', "
+            "'trova', 'apri' - queste sono AZIONI che richiedono altre funzioni specifiche! "
+            "NON USARE PER: immagini→cerca_immagini, gif→cerca_gif, meteo→meteo_italia, "
+            "radio→radio_italia, timer→timer_sveglia, musica→play_music, ricette→ricette. "
+            "USARE SOLO PER domande tipo: 'chi era Napoleone', 'cos'è il DNA', 'spiegami la gravità'."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "domanda": {
                     "type": "string",
-                    "description": "La domanda dell'utente a cui rispondere"
+                    "description": "Domanda informativa pura, senza richiesta di azione"
                 }
             },
             "required": ["domanda"]

@@ -90,13 +90,46 @@ class ServerPluginExecutor(ToolExecutor):
             # AI e risposta
             "risposta_ai", "web_search",
             # Sistema
-            "sommario_funzioni", "cambia_profilo", "aiuto_profilo",
+            "sommario_funzioni", "cambia_profilo", "aiuto_profilo", "chi_sono",
             # Easter egg e personalità
             "personalita_multiple", "easter_egg_folli", "giannino_easter_egg",
             # Utility base
-            "meteo_italia", "timer_sveglia", "calcolatrice",
-            # Media
-            "radio_italia", "notizie_italia",
+            "meteo_italia", "timer_sveglia", "calcolatrice", "convertitore",
+            # Media e intrattenimento
+            "radio_italia", "notizie_italia", "podcast_italia", "cerca_musica",
+            # Umorismo e curiosità
+            "barzelletta_bambini", "barzelletta_adulti", "curiosita", "proverbi_italiani", "oroscopo",
+            # Giochi
+            "quiz_trivia", "dado", "impiccato", "venti_domande", "chi_vuol_essere",
+            # Quotidiano
+            "accadde_oggi", "santo_del_giorno", "frase_del_giorno",
+            # Benessere e supporto
+            "check_benessere", "supporto_emotivo", "meditazione", "ginnastica_dolce",
+            "compagno_antisolitudine", "compagno_notturno", "suoni_ambiente",
+            # Utility avanzate
+            "lista_spesa", "promemoria", "promemoria_farmaci", "rubrica_vocale", "note_vocali",
+            "ricette", "ricette_ingredienti", "guida_ristoranti", "leggi_pagina", "shopping_vocale",
+            # Traduzione
+            "traduttore", "traduttore_realtime",
+            # Domotica
+            "domotica", "hass_get_state", "hass_set_state",
+            # Smart Home
+            "smart_fridge",
+            # Memoria e diario
+            "memoria_personale", "diario_vocale", "diario_umore", "ricordami", "cosa_ricordi",
+            # Emergenza
+            "emergenza_rapida", "sos_emergenza", "numeri_utili",
+            # Bambini
+            "storie_bambini", "versi_animali",
+            # Extra
+            "chiacchierata", "complimenti", "genera_rime", "osterie_goliardiche",
+            "briefing_mattutino", "routine_mattutina", "intrattenitore_anziani",
+            "lotto_estrazioni", "guida_turistica", "oracolo", "karaoke",
+            # Altro
+            "cooking_companion", "allenamento_mentale", "agenda_eventi", "conta_acqua",
+            "cruciverba_vocale", "battaglia_navale", "beatbox_umano",
+            # Media e display ESP32-S3
+            "cerca_immagini", "cerca_gif", "cerca_musica_web",
         ]
 
         # 获取配置中的函数

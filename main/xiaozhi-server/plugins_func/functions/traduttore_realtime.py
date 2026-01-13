@@ -53,23 +53,17 @@ ALIAS_LINGUE = {
 }
 
 # Comandi per uscire dalla modalità traduzione
-# Include varianti fonetiche per quando ASR interpreta "esci" in altre lingue
+# IMPORTANTE: Usa frasi SPECIFICHE, non parole comuni!
 EXIT_COMMANDS = [
-    # Italiano - PAROLE CHIAVE UNIVOCHE (raccomandate!)
-    "normale", "torna normale", "modalità normale", "parla italiano",
-    "xiaozhi", "traduzione off", "interprete off",
-    # Italiano standard
-    "esci", "stop", "basta", "fine", "termina", "chiudi",
-    "stop traduttore", "esci dal traduttore", "disattiva traduttore",
+    # Comandi SPECIFICI (raccomandati - non usabili accidentalmente)
+    "stop traduttore", "esci traduttore", "esci dal traduttore",
+    "disattiva traduttore", "chiudi traduttore", "fine traduttore",
+    "traduzione off", "interprete off", "stop interprete",
     "fine traduzione", "basta tradurre", "smetti di tradurre",
-    # Varianti fonetiche ASR (quando ASR interpreta male "esci")
-    "eis", "exi", "exit", "exci", "eshi", "reixi", "e sci",
-    # Russo (ASR interpreta "esci" come...)
-    "ищи", "иши", "иски",
-    # Cinese/altre interpretazioni
-    "出去", "退出",
-    # Inglese
-    "quit", "end", "close",
+    # Comando specifico per tornare alla chat
+    "torna alla chat", "parla normale", "modalità chat",
+    # Parola chiave unica
+    "xiaozhi",
 ]
 
 
@@ -121,6 +115,59 @@ def detect_script(text: str) -> str:
         return "latin"
 
     return "unknown"
+
+
+# Parole comuni in altre lingue scritte in caratteri latini (romaji, pinyin, ecc.)
+FOREIGN_WORDS = {
+    "japanese": [
+        "arigato", "arigatou", "konnichiwa", "sayonara", "ohayo", "oyasumi",
+        "sumimasen", "gomen", "hai", "iie", "nani", "kawaii", "sugoi", "baka",
+        "sensei", "san", "sama", "kun", "chan", "desu", "moshi moshi", "itadakimasu",
+        "ganbatte", "oishi", "kirei", "genki", "watashi", "anata", "kore", "sore"
+    ],
+    "chinese": [
+        "nihao", "ni hao", "xie xie", "xiexie", "zaijian", "duibuqi", "mei wenti",
+        "wo", "ni", "ta", "shi", "bu shi", "hao", "hen hao", "mingbai", "dong",
+        "qing", "xihuan", "ai", "pengyou", "jiaren", "chi fan", "he shui"
+    ],
+    "korean": [
+        "annyeong", "annyeonghaseyo", "kamsahamnida", "gomapda", "saranghae",
+        "ne", "aniyo", "oppa", "unnie", "hyung", "noona", "aigoo", "daebak",
+        "fighting", "hwaiting", "jjang", "aegyo", "chingu", "sunbae", "hoobae"
+    ],
+    "arabic": [
+        "salam", "salaam", "marhaba", "shukran", "afwan", "inshallah", "mashallah",
+        "habibi", "habibti", "yalla", "wallah", "naam", "la", "aiwa", "ahlan"
+    ],
+    "russian": [
+        "privet", "spasibo", "pozhaluysta", "da", "nyet", "kak dela", "horosho",
+        "poka", "do svidaniya", "zdravstvuyte", "izvinite", "ya", "ty", "vy"
+    ]
+}
+
+
+def detect_foreign_words(text: str, target_lang: str) -> bool:
+    """Rileva se il testo contiene parole della lingua target scritte in latino"""
+    text_lower = text.lower().strip()
+
+    # Mappa lingua target -> chiave FOREIGN_WORDS
+    lang_map = {
+        "ja": "japanese", "japanese": "japanese",
+        "zh": "chinese", "chinese": "chinese",
+        "ko": "korean", "korean": "korean",
+        "ar": "arabic", "arabic": "arabic",
+        "ru": "russian", "cyrillic": "russian"
+    }
+
+    lang_key = lang_map.get(target_lang)
+    if not lang_key or lang_key not in FOREIGN_WORDS:
+        return False
+
+    words = FOREIGN_WORDS[lang_key]
+    for word in words:
+        if word in text_lower:
+            return True
+    return False
 
 
 def is_exit_command(text: str) -> bool:
@@ -254,18 +301,23 @@ def handle_translation_mode(conn, text: str) -> ActionResponse:
     detected_script = detect_script(text)
     target_script = target_info.get("script", "unknown")
 
-    logger.bind(tag=TAG).debug(f"Script rilevato: {detected_script}, target script: {target_script}")
+    # Controlla se contiene parole straniere in caratteri latini (romaji, pinyin, ecc.)
+    has_foreign_words = detect_foreign_words(text, target_code)
+
+    logger.bind(tag=TAG).debug(f"Script rilevato: {detected_script}, target script: {target_script}, foreign words: {has_foreign_words}")
 
     # Determina direzione traduzione
-    if detected_script == target_script and detected_script != "latin":
-        # Testo nella lingua target → traduci in italiano
+    is_target_language = (detected_script == target_script and detected_script != "latin") or has_foreign_words
+
+    if is_target_language:
+        # Testo nella lingua target (anche romaji/pinyin) → traduci in italiano
         from_code = target_code
         from_info = target_info
         to_code = source_code
         to_info = source_info
         direction = "incoming"  # dall'interlocutore
     else:
-        # Testo italiano (o latino) → traduci nella lingua target
+        # Testo italiano → traduci nella lingua target
         from_code = source_code
         from_info = source_info
         to_code = target_code
@@ -452,3 +504,18 @@ def deactivate_translation(conn):
     """Disattiva modalità traduzione (utility)"""
     session_id = get_session_id(conn)
     TRANSLATION_SESSIONS.pop(session_id, None)
+
+
+def clear_translation_session(device_id: str):
+    """Pulisci sessione traduzione per device_id (chiamato alla riconnessione)"""
+    if device_id and device_id in TRANSLATION_SESSIONS:
+        logger.bind(tag=TAG).info(f"Pulisco sessione traduzione obsoleta per {device_id}")
+        TRANSLATION_SESSIONS.pop(device_id, None)
+
+
+def cleanup_stale_sessions():
+    """Rimuovi tutte le sessioni - chiamato al riavvio del server"""
+    count = len(TRANSLATION_SESSIONS)
+    TRANSLATION_SESSIONS.clear()
+    if count > 0:
+        logger.bind(tag=TAG).info(f"Pulite {count} sessioni traduzione obsolete")

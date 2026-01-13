@@ -137,16 +137,19 @@ RISPOSTA_INTELLIGENTE_FUNCTION_DESC = {
     "function": {
         "name": "risposta_intelligente",
         "description": (
-            "智能回答 / Risponde a domande generiche usando AI (Gemini/DuckDuckGo). "
-            "Usato come fallback quando nessuna funzione specifica corrisponde. "
-            "Cerca di dare una risposta intelligente e naturale."
+            "ULTIMA RISORSA - Usare SOLO per domande di cultura generale senza azione specifica. "
+            "NON USARE SE: l'utente chiede immagini/foto (→cerca_immagini), gif (→cerca_gif), "
+            "meteo (→meteo_italia), radio (→radio_italia), timer (→timer_sveglia), "
+            "ricette (→ricette), notizie (→notizie_italia), musica (→play_music). "
+            "USARE SOLO PER: 'chi era Einstein', 'cos'è la fotosintesi', 'spiegami la relatività', "
+            "'qual è la capitale del Giappone', domande storiche, scientifiche, definizioni."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "domanda": {
                     "type": "string",
-                    "description": "La domanda dell'utente"
+                    "description": "Solo domande di cultura generale senza azione richiesta"
                 }
             },
             "required": ["domanda"]

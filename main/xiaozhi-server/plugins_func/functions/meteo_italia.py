@@ -15,16 +15,19 @@ METEO_ITALIA_FUNCTION_DESC = {
     "function": {
         "name": "meteo_italia",
         "description": (
-            "获取意大利城市天气 / Ottieni il meteo per qualsiasi città italiana. "
-            "当用户询问意大利任何城市的天气时使用。"
-            "Use when user asks: 'che tempo fa a...', 'meteo...', 'weather in Italy...'"
+            "ATTIVARE SEMPRE per richieste meteo in Italia. "
+            "TRIGGER ESATTI: 'che tempo fa', 'com'è il tempo', 'meteo', 'previsioni', "
+            "'temperatura', 'piove', 'fa freddo', 'fa caldo', 'devo prendere l'ombrello', "
+            "'che tempo fa a Roma', 'meteo Milano', 'previsioni Torino'. "
+            "ESEMPIO: 'che tempo fa a Torino' → city='Torino'. "
+            "Per chiedere: 'Che tempo fa a [città]?' oppure 'Meteo [città]'"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "city": {
                     "type": "string",
-                    "description": "Nome della città, es: Asti, Torino, Roma",
+                    "description": "Nome della città italiana. Estrarre dalla frase utente. Es: 'meteo Roma' → city='Roma'",
                 },
             },
             "required": ["city"],

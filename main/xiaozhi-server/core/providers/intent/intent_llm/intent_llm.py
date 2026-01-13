@@ -111,6 +111,100 @@ User: "chiedi a gpt cosa sono i buchi neri" -> {{"function_call": {{"name": "ris
 User: "cerca con gemini la teoria della relatività" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "la teoria della relatività"}}}}}}
 User: "domanda ai: come si forma un arcobaleno" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "come si forma un arcobaleno"}}}}}}
 User: "chiedi a claude perché i gatti fanno le fusa" -> {{"function_call": {{"name": "risposta_ai", "arguments": {{"domanda": "perché i gatti fanno le fusa"}}}}}}
+User: "cerca immagini di natura" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "cerca", "query": "natura"}}}}}}
+User: "cerca immagini di gatti" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "cerca", "query": "gatti"}}}}}}
+User: "mostrami foto di montagne" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "cerca", "query": "montagne"}}}}}}
+User: "fammi vedere immagini di tramonti" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "cerca", "query": "tramonti"}}}}}}
+User: "prossima immagine" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "prossima"}}}}}}
+User: "ferma slideshow" -> {{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "ferma"}}}}}}
+User: "cerca gif di cani" -> {{"function_call": {{"name": "cerca_gif", "arguments": {{"azione": "cerca", "query": "cani"}}}}}}
+User: "mostra gif divertenti" -> {{"function_call": {{"name": "cerca_gif", "arguments": {{"azione": "cerca", "query": "divertenti"}}}}}}
+User: "gif trending" -> {{"function_call": {{"name": "cerca_gif", "arguments": {{"azione": "trending"}}}}}}
+User: "cosa è successo oggi nella storia" -> {{"function_call": {{"name": "accadde_oggi"}}}}
+User: "accadde oggi" -> {{"function_call": {{"name": "accadde_oggi"}}}}
+User: "metti un timer di 5 minuti" -> {{"function_call": {{"name": "timer_sveglia", "arguments": {{"minuti": 5}}}}}}
+User: "svegliami tra 10 minuti" -> {{"function_call": {{"name": "timer_sveglia", "arguments": {{"minuti": 10}}}}}}
+User: "imposta sveglia alle 7" -> {{"function_call": {{"name": "timer_sveglia", "arguments": {{"ora": "07:00"}}}}}}
+User: "notizie di oggi" -> {{"function_call": {{"name": "notizie_italia"}}}}
+User: "ultime notizie" -> {{"function_call": {{"name": "notizie_italia"}}}}
+User: "quali sono le news" -> {{"function_call": {{"name": "notizie_italia"}}}}
+User: "oroscopo ariete" -> {{"function_call": {{"name": "oroscopo", "arguments": {{"segno": "ariete"}}}}}}
+User: "che dice l'oroscopo" -> {{"function_call": {{"name": "oroscopo"}}}}
+User: "estrazioni del lotto" -> {{"function_call": {{"name": "lotto_estrazioni"}}}}
+User: "numeri del lotto" -> {{"function_call": {{"name": "lotto_estrazioni"}}}}
+User: "santo del giorno" -> {{"function_call": {{"name": "santo_del_giorno"}}}}
+User: "che santo è oggi" -> {{"function_call": {{"name": "santo_del_giorno"}}}}
+User: "ricetta della pasta al pesto" -> {{"function_call": {{"name": "ricette", "arguments": {{"ricetta": "pasta al pesto"}}}}}}
+User: "come si fa la pizza" -> {{"function_call": {{"name": "ricette", "arguments": {{"ricetta": "pizza"}}}}}}
+User: "dimmi una curiosità" -> {{"function_call": {{"name": "curiosita"}}}}
+User: "lo sapevi che" -> {{"function_call": {{"name": "curiosita"}}}}
+User: "proverbio del giorno" -> {{"function_call": {{"name": "proverbi_italiani"}}}}
+User: "dimmi un proverbio" -> {{"function_call": {{"name": "proverbi_italiani"}}}}
+User: "frase del giorno" -> {{"function_call": {{"name": "frase_del_giorno"}}}}
+User: "citazione motivazionale" -> {{"function_call": {{"name": "frase_del_giorno"}}}}
+User: "facciamo un quiz" -> {{"function_call": {{"name": "quiz_trivia"}}}}
+User: "quiz di cultura generale" -> {{"function_call": {{"name": "quiz_trivia"}}}}
+User: "raccontami una storia" -> {{"function_call": {{"name": "storie_bambini"}}}}
+User: "storia della buonanotte" -> {{"function_call": {{"name": "storie_bambini"}}}}
+User: "giochiamo all'impiccato" -> {{"function_call": {{"name": "impiccato"}}}}
+User: "gioco dell'impiccato" -> {{"function_call": {{"name": "impiccato"}}}}
+User: "giochiamo a battaglia navale" -> {{"function_call": {{"name": "battaglia_navale"}}}}
+User: "tira un dado" -> {{"function_call": {{"name": "dado"}}}}
+User: "lancia i dadi" -> {{"function_call": {{"name": "dado"}}}}
+User: "20 domande" -> {{"function_call": {{"name": "venti_domande"}}}}
+User: "indovina cosa penso" -> {{"function_call": {{"name": "venti_domande"}}}}
+User: "chi vuol essere milionario" -> {{"function_call": {{"name": "chi_vuol_essere"}}}}
+User: "facciamo meditazione" -> {{"function_call": {{"name": "meditazione"}}}}
+User: "guidami in una meditazione" -> {{"function_call": {{"name": "meditazione"}}}}
+User: "ginnastica dolce" -> {{"function_call": {{"name": "ginnastica_dolce"}}}}
+User: "esercizi di stretching" -> {{"function_call": {{"name": "ginnastica_dolce"}}}}
+User: "podcast italiano" -> {{"function_call": {{"name": "podcast_italia"}}}}
+User: "metti un podcast" -> {{"function_call": {{"name": "podcast_italia"}}}}
+User: "karaoke" -> {{"function_call": {{"name": "karaoke"}}}}
+User: "cantiamo insieme" -> {{"function_call": {{"name": "karaoke"}}}}
+User: "calcola 5 per 8" -> {{"function_call": {{"name": "calcolatrice", "arguments": {{"espressione": "5*8"}}}}}}
+User: "quanto fa 100 diviso 4" -> {{"function_call": {{"name": "calcolatrice", "arguments": {{"espressione": "100/4"}}}}}}
+User: "converti 10 euro in dollari" -> {{"function_call": {{"name": "convertitore", "arguments": {{"valore": 10, "da": "euro", "a": "dollari"}}}}}}
+User: "quanti km sono 5 miglia" -> {{"function_call": {{"name": "convertitore", "arguments": {{"valore": 5, "da": "miglia", "a": "km"}}}}}}
+User: "promemoria alle 15 chiamare Mario" -> {{"function_call": {{"name": "promemoria", "arguments": {{"ora": "15:00", "messaggio": "chiamare Mario"}}}}}}
+User: "ricordami di comprare il pane" -> {{"function_call": {{"name": "promemoria", "arguments": {{"messaggio": "comprare il pane"}}}}}}
+User: "prendi nota che devo pagare bolletta" -> {{"function_call": {{"name": "note_vocali", "arguments": {{"nota": "pagare bolletta"}}}}}}
+User: "scrivi appunto riunione domani" -> {{"function_call": {{"name": "note_vocali", "arguments": {{"nota": "riunione domani"}}}}}}
+User: "quali funzioni hai" -> {{"function_call": {{"name": "sommario_funzioni"}}}}
+User: "help" -> {{"function_call": {{"name": "sommario_funzioni"}}}}
+User: "lista funzioni" -> {{"function_call": {{"name": "sommario_funzioni"}}}}
+User: "cosa sai fare" -> {{"function_call": {{"name": "sommario_funzioni"}}}}
+User: "come ti uso" -> {{"function_call": {{"name": "sommario_funzioni"}}}}
+User: "come si attiva la radio" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "radio"}}}}}}
+User: "come uso il timer" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "timer"}}}}}}
+User: "come attivo il meteo" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "meteo"}}}}}}
+User: "come faccio a usare le immagini" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "immagini"}}}}}}
+User: "come funziona il quiz" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "quiz"}}}}}}
+User: "funzioni audio" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "audio"}}}}}}
+User: "funzioni giochi" -> {{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "giochi"}}}}}}
+User: "emergenza" -> {{"function_call": {{"name": "sos_emergenza"}}}}
+User: "chiama aiuto" -> {{"function_call": {{"name": "sos_emergenza"}}}}
+User: "numero dei carabinieri" -> {{"function_call": {{"name": "numeri_utili", "arguments": {{"servizio": "carabinieri"}}}}}}
+User: "numero della polizia" -> {{"function_call": {{"name": "numeri_utili", "arguments": {{"servizio": "polizia"}}}}}}
+User: "ristoranti vicino a me" -> {{"function_call": {{"name": "guida_ristoranti"}}}}
+User: "consiglia un ristorante" -> {{"function_call": {{"name": "guida_ristoranti"}}}}
+User: "cosa vedere a Firenze" -> {{"function_call": {{"name": "guida_turistica", "arguments": {{"citta": "Firenze"}}}}}}
+User: "guida turistica Roma" -> {{"function_call": {{"name": "guida_turistica", "arguments": {{"citta": "Roma"}}}}}}
+User: "accendi la luce" -> {{"function_call": {{"name": "domotica", "arguments": {{"comando": "accendi", "dispositivo": "luce"}}}}}}
+User: "spegni il condizionatore" -> {{"function_call": {{"name": "domotica", "arguments": {{"comando": "spegni", "dispositivo": "condizionatore"}}}}}}
+User: "come mi sento oggi" -> {{"function_call": {{"name": "check_benessere"}}}}
+User: "controllo benessere" -> {{"function_call": {{"name": "check_benessere"}}}}
+User: "non riesco a dormire" -> {{"function_call": {{"name": "compagno_notturno"}}}}
+User: "ho bisogno di sfogarmi" -> {{"function_call": {{"name": "supporto_emotivo"}}}}
+User: "mi sento triste" -> {{"function_call": {{"name": "supporto_emotivo"}}}}
+User: "fammi un complimento" -> {{"function_call": {{"name": "complimenti"}}}}
+User: "briefing mattutino" -> {{"function_call": {{"name": "briefing_mattutino"}}}}
+User: "buongiorno cosa c'è oggi" -> {{"function_call": {{"name": "briefing_mattutino"}}}}
+User: "leggi questa pagina web" -> {{"function_call": {{"name": "leggi_pagina"}}}}
+User: "oracolo dimmi il futuro" -> {{"function_call": {{"name": "oracolo"}}}}
+User: "consulta l'oracolo" -> {{"function_call": {{"name": "oracolo"}}}}
+User: "genera una rima con amore" -> {{"function_call": {{"name": "genera_rime", "arguments": {{"parola": "amore"}}}}}}
+User: "trova una rima per sole" -> {{"function_call": {{"name": "genera_rime", "arguments": {{"parola": "sole"}}}}}}
 
 OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text before or after."""
         return prompt
@@ -214,6 +308,39 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ NOTIZIE ============
         if match_any(['notizie', 'ultime news', 'cosa succede', 'telegiornale', 'rassegna stampa']):
             return '{"function_call": {"name": "notizie_italia", "arguments": {"action": "headlines"}}}'
+
+        # ============ SMART FRIDGE ============
+        if match_any(['frigo', 'frigorifero', 'nel frigo', 'in frigo', 'lista della spesa', 'lista spesa',
+                      'cosa devo comprare', 'cosa manca', 'prodotti in scadenza', 'cosa scade',
+                      'svuota lista', 'cancella lista', 'togli dalla lista', 'rimuovi dalla lista']):
+            # Svuota lista della spesa
+            if match_any(['svuota', 'cancella tutto', 'elimina tutto', 'pulisci lista']):
+                return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "svuota_spesa"}}}'
+            # Rimuovi dalla lista della spesa
+            if match_any(['togli', 'rimuovi', 'cancella', 'elimina']) and match_any(['lista', 'spesa']):
+                # Estrai nome prodotto
+                prodotto_match = re.search(r'(?:togli|rimuovi|cancella|elimina)\s+(.+?)(?:\s+(?:dalla|nella)\s+lista|\s*$)', text_lower)
+                prodotto = prodotto_match.group(1).strip() if prodotto_match else ""
+                return f'{{"function_call": {{"name": "smart_fridge", "arguments": {{"azione": "rimuovi_spesa", "prodotto": "{prodotto}"}}}}}}'
+            # Aggiungi alla lista della spesa
+            if match_any(['aggiungi', 'metti', 'inserisci', 'compra']):
+                # Estrai nome prodotto
+                prodotto_match = re.search(r'(?:aggiungi|metti|inserisci|compra)\s+(.+?)(?:\s+(?:alla|nella)\s+lista|\s*$)', text_lower)
+                prodotto = prodotto_match.group(1).strip() if prodotto_match else ""
+                qty_match = re.search(r'(\d+)\s+(?:di\s+)?', text_lower)
+                qty = qty_match.group(1) if qty_match else "1"
+                return f'{{"function_call": {{"name": "smart_fridge", "arguments": {{"azione": "aggiungi_spesa", "prodotto": "{prodotto}", "quantita": {qty}}}}}}}'
+            # Cosa scade / prodotti in scadenza
+            if match_any(['scade', 'scadenza', 'scadenze', 'sta per scadere']):
+                return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "scadenze"}}}'
+            # Lista della spesa
+            if match_any(['lista', 'spesa', 'comprare', 'manca']):
+                return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "spesa"}}}'
+            # Inventario / cosa c'è nel frigo
+            if match_any(['cosa c', 'inventario', 'contenuto', 'dentro']):
+                return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "inventario"}}}'
+            # Default: statistiche
+            return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "statistiche"}}}'
 
         # ============ BARZELLETTE ============
         # NON matchare "raccontami una storia" (va a storie_bambini)
@@ -408,6 +535,25 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['podcast', 'ascolta podcast', 'metti podcast']):
             return '{"function_call": {"name": "podcast_italia", "arguments": {"action": "list"}}}'
 
+        # ============ BEATBOX ============
+        # Match diretto per beatbox - risposta immediata senza LLM
+        if match_any(['beatbox', 'beat box', 'fai un beat', 'fammi un beat', 'fammi una base',
+                      'base rap', 'base hip hop', 'base trap', 'boom tss', 'fai il rapper',
+                      'beatboxing', 'fai beatbox', 'fai il beat', 'facciamo beatbox']):
+            # Cerca stile specifico
+            stili = {'hip hop': 'hip hop', 'hiphop': 'hip hop', 'trap': 'trap', 'dubstep': 'dubstep',
+                     'drum and bass': 'drum and bass', 'dnb': 'drum and bass', 'reggaeton': 'reggaeton',
+                     'freestyle': 'freestyle', 'techno': 'techno', 'jazz': 'jazz', 'italiano': 'italiano',
+                     'robot': 'robot'}
+            stile = ""
+            for key, val in stili.items():
+                if key in text_lower:
+                    stile = val
+                    break
+            if stile:
+                return f'{{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "{stile}"}}}}}}'
+            return '{"function_call": {"name": "beatbox_umano"}}'
+
         # ============ LOTTO ============
         if match_any(['lotto', 'estrazione', 'numeri lotto', 'superenalotto']):
             return '{"function_call": {"name": "lotto_estrazioni"}}'
@@ -455,12 +601,32 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             # Aiuto generale
             return '{"function_call": {"name": "aiuto_profilo", "arguments": {"tipo": "generale"}}}'
 
-        # ============ SOMMARIO FUNZIONI ============
+        # ============ SOMMARIO FUNZIONI & COME SI ATTIVA ============
+        # Pattern: "come si attiva [qualcosa]", "come uso [qualcosa]", "come funziona [qualcosa]"
+        import re
+        attiva_patterns = [
+            r'come (?:si )?attiva (?:la |il |lo |l\'|un |una )?(.+)',
+            r'come (?:si )?usa (?:la |il |lo |l\'|un |una )?(.+)',
+            r'come uso (?:la |il |lo |l\'|un |una )?(.+)',
+            r'come funziona (?:la |il |lo |l\'|un |una )?(.+)',
+            r'come faccio (?:a |ad )?(?:usare |attivare |aprire )?(?:la |il |lo |l\'|un |una )?(.+)',
+            r'(?:come )?(?:si )?(?:attiva|usa|funziona) (.+)\?',
+        ]
+        for pattern in attiva_patterns:
+            m = re.search(pattern, text_lower)
+            if m:
+                funzione = m.group(1).strip().rstrip('?')
+                # Rimuovi parole comuni
+                for word in ['funzione', 'la', 'il', 'lo', 'un', 'una', 'di', 'del', 'della']:
+                    funzione = funzione.replace(word, '').strip()
+                if funzione and len(funzione) > 1:
+                    return f'{{"function_call": {{"name": "sommario_funzioni", "arguments": {{"funzione_specifica": "{funzione}"}}}}}}'
+
         # "cosa sai fare" va a CHI_SONO, qui solo richieste esplicite di elenco
         # Supporta richiesta per categoria specifica
         categorie_sommario = ['audio', 'media', 'giochi', 'gioco', 'informazioni', 'info', 'cucina', 'ricette',
                               'utilità', 'utility', 'traduzione', 'ricerca', 'benessere', 'casa', 'domotica',
-                              'guide', 'bambini', 'famiglia', 'personalità']
+                              'guide', 'bambini', 'famiglia', 'personalità', 'immagini', 'display']
 
         # Prima controlla se è una richiesta di categoria specifica: "funzionalità giochi", "quali giochi hai"
         for cat in categorie_sommario:
@@ -472,7 +638,7 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'funzionalità disponibili',
                       'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con',
                       'elenco funzionalita', 'elenco funzionalità', 'lista funzionalita', 'lista funzionalità',
-                      'che funzioni hai', 'che funzionalità hai', 'funzioni disponibili']):
+                      'che funzioni hai', 'che funzionalità hai', 'funzioni disponibili', 'help', 'aiuto']):
             return '{"function_call": {"name": "sommario_funzioni"}}'
 
         # ============ SUPPORTO EMOTIVO (ansia, paura - NON solitudine) ============

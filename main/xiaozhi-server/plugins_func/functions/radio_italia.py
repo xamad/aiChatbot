@@ -17,8 +17,8 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 60  # Secondi per singolo chunk (1 minuto - streaming progressivo)
-MAX_CONTINUOUS_CHUNKS = 10  # Max chunk per sessione (10 chunk x 60s = 10 minuti totali)
+CHUNK_DURATION = 10  # Secondi per chunk (partenza veloce ~10-15 sec attesa)
+MAX_CONTINUOUS_CHUNKS = 60  # Max chunk per sessione (60 x 10s = 10 minuti totali)
 
 # Stazioni radio italiane con stream URL verificati (Gennaio 2026)
 # Mix di stream MP3 diretti e HLS (m3u8)
@@ -154,24 +154,26 @@ RADIO_ITALIA_FUNCTION_DESC = {
     "function": {
         "name": "radio_italia",
         "description": (
-            "播放意大利广播电台 / Riproduce stazioni radio italiane in streaming. "
-            "当用户想听广播时使用。"
-            "Use when: 'sintonizzati su radio', 'sintonizza radio', 'metti radio...', "
-            "'ascolta radio...', 'radio deejay', 'radio zeta', 'radio z', 'rai radio 1', "
-            "'accendi la radio', 'fammi sentire rtl', 'm2o', 'radio capital', "
-            "'elenco radio', 'quali radio hai', 'che radio ci sono', 'lista radio', "
-            "'dimmi le radio disponibili', 'cosa posso ascoltare'"
+            "ATTIVARE SEMPRE per ascoltare stazioni radio italiane in streaming. "
+            "TRIGGER ESATTI: 'metti la radio', 'accendi radio', 'ascolta radio', "
+            "'sintonizza', 'fammi sentire la radio', 'voglio ascoltare la radio', "
+            "'radio deejay', 'radio zeta', 'radio 105', 'virgin radio', 'rtl', 'm2o', "
+            "'rai radio', 'radio capital', 'kiss kiss', 'radio italia'. "
+            "ELENCO: 'quali radio hai', 'elenco radio', 'che radio ci sono'. "
+            "STOP: 'ferma la radio', 'stop radio', 'spegni radio'. "
+            "ESEMPIO: 'metti radio deejay' → action='play', station='radio deejay'. "
+            "Per chiedere: 'Metti [nome radio]' oppure 'Ascolta [nome radio]'"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "station": {
                     "type": "string",
-                    "description": "Nome della stazione radio (es: radio deejay, m2o, rai radio 1, radio zeta)",
+                    "description": "Nome stazione. Es: 'metti radio zeta' → station='radio zeta'",
                 },
                 "action": {
                     "type": "string",
-                    "description": "Azione: play (avvia), stop (ferma), list (elenco stazioni)",
+                    "description": "play=avvia streaming, stop=ferma, list=mostra elenco stazioni",
                     "enum": ["play", "stop", "list"]
                 },
             },
@@ -239,8 +241,8 @@ def capture_radio_chunk(url: str, output_path: str, duration: int = 30, referer:
         raw_file = output_path.replace('.mp3', '_raw.dat')
 
         try:
-            # Calcola bytes da scaricare (assumo 192kbps = 24KB/s per sicurezza)
-            bytes_to_download = duration * 24 * 1024
+            # Calcola bytes da scaricare (assumo 320kbps = 40KB/s + 50% margine)
+            bytes_to_download = duration * 60 * 1024  # ~480kbps per coprire tutti i bitrate
 
             with urllib.request.urlopen(req, timeout=duration + 30) as resp:
                 if resp.status != 200:
@@ -373,22 +375,15 @@ def radio_italia(conn, action: str = "list", station: str = None):
     logger.bind(tag=TAG).info(f"Radio Italia: action={action}, station={station}")
 
     if action == "list":
-        result = "Ecco le radio disponibili:\n\n"
-        result += "RADIO COMMERCIALI: "
+        result = "Ecco le radio disponibili: "
         result += "Radio DeeJay, m2o, Radio Capital, Radio Zeta, Radio Italia, "
-        result += "Radio 105, Virgin Radio, Radio Kiss Kiss.\n\n"
-        result += "RAI RADIO: "
-        result += "Rai Radio 1 per le notizie, Rai Radio 2 per musica e intrattenimento, "
-        result += "Rai Radio 3 per cultura, Rai Radio Classica.\n\n"
-        result += "NEWS E TALK: "
-        result += "Radio Radicale per politica, Radio Cusano Campus.\n\n"
-        result += "INTERNAZIONALI: "
-        result += "BBC World Service e BBC Radio 4 in inglese.\n\n"
+        result += "Radio 105, Virgin Radio, RTL 102.5, Radio Kiss Kiss, "
+        result += "Rai Radio 1, 2, 3, Radio Radicale, BBC World Service. "
         result += "Dimmi quale vuoi ascoltare!"
-        return ActionResponse(Action.REQLLM, result, None)
+        return ActionResponse(Action.RESPONSE, result, None)
 
     if action == "stop":
-        return ActionResponse(Action.REQLLM, "Radio fermata", None)
+        return ActionResponse(Action.RESPONSE, "Radio fermata!", None)
 
     if action == "play":
         if not station:
@@ -404,10 +399,12 @@ def radio_italia(conn, action: str = "list", station: str = None):
         # Avvia cattura e riproduzione in background
         conn.loop.create_task(capture_and_play_radio(conn, found))
 
+        # IMPORTANTE: Action.RESPONSE per evitare che l'LLM aggiunga domande
+        # Il terzo parametro è il testo PARLATO - deve essere uguale al testo mostrato
         return ActionResponse(
-            Action.REQLLM,
-            f"Sintonizzazione su **{found['name']}**... un momento!",
-            None
+            Action.RESPONSE,
+            f"Sintonizzazione su {found['name']}... un momento!",
+            f"Sintonizzazione su {found['name']}... un momento!"
         )
 
     return ActionResponse(Action.REQLLM, "Azione non riconosciuta", None)

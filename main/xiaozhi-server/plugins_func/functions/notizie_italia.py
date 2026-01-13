@@ -15,10 +15,10 @@ NOTIZIE_FUNCTION_DESC = {
     "function": {
         "name": "notizie_italia",
         "description": (
-            "获取意大利新闻 / Ottieni le ultime notizie dall'Italia. "
-            "当用户询问新闻、头条、意大利发生了什么时使用。"
-            "Use when user asks: 'notizie', 'news', 'cosa è successo', 'ultime notizie', "
-            "'headlines', 'giornale', 'ansa', 'repubblica'"
+            "Ottieni le ultime notizie dall'Italia. "
+            "Usare quando: 'notizie', 'ultime notizie', 'cosa è successo', "
+            "'giornale', 'ansa', 'leggi le news', 'notizie di oggi', "
+            "'cronaca', 'notizie sportive', 'dimmi le notizie'"
         ),
         "parameters": {
             "type": "object",

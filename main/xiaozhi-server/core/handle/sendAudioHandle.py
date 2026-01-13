@@ -7,7 +7,7 @@ from core.providers.tts.dto.dto import SentenceType
 from core.utils.audioRateController import AudioRateController
 
 TAG = __name__
-# 音频帧时长（毫秒）
+# 音频帧时长（毫秒）- 60ms @ 24kHz = 1440 samples
 AUDIO_FRAME_DURATION = 60
 # 预缓冲包数量，直接发送以减少延迟
 PRE_BUFFER_COUNT = 5
@@ -221,9 +221,16 @@ async def _send_audio_with_rate_control(
 async def _do_send_audio(conn, opus_packet, flow_control):
     """
     执行实际的音频发送
+    Protocol V3 format: [1 byte: type=0] [4 bytes: timestamp] [opus data]
     """
     packet_index = flow_control.get("packet_count", 0)
     sequence = flow_control.get("sequence", 0)
+
+    # Always log first packet to debug Opus format
+    if packet_index == 0:
+        first_bytes = opus_packet[:10] if len(opus_packet) >= 10 else opus_packet
+        hex_str = ' '.join(f'{b:02x}' for b in first_bytes)
+        conn.logger.bind(tag=TAG).warning(f"OPUS DEBUG: size={len(opus_packet)}, first_10_bytes=[{hex_str}]")
 
     if conn.conn_from_mqtt_gateway:
         # 计算时间戳（基于播放位置）
@@ -231,8 +238,33 @@ async def _do_send_audio(conn, opus_packet, flow_control):
         timestamp = int(start_time * 1000) % (2**32)
         await _send_to_mqtt_gateway(conn, opus_packet, timestamp, sequence)
     else:
-        # 直接发送opus数据包
-        await conn.websocket.send(opus_packet)
+        # Check client protocol version (C3 mini = v1, XAMAD S3 = v3)
+        client_version = getattr(conn, 'client_protocol_version', 1)
+
+        if client_version >= 3:
+            # Protocol V3: Add 4-byte header before opus data
+            # Header: [type: 1 byte] [reserved: 1 byte] [payload_size: 2 bytes big-endian]
+            header = bytearray(4)
+            header[0] = 0  # type = 0 for OPUS audio
+            header[1] = 0  # reserved
+            header[2:4] = len(opus_packet).to_bytes(2, 'big')  # payload size
+
+            # Combine header + opus data
+            packet_with_header = bytes(header) + bytes(opus_packet)
+
+            # Debug: log first few packets
+            if packet_index < 3:
+                hex_all = ' '.join(f'{b:02x}' for b in packet_with_header[:20])
+                conn.logger.bind(tag=TAG).warning(f"SENDING V3 Frame #{packet_index}: {len(packet_with_header)} bytes: [{hex_all}...]")
+
+            await conn.websocket.send(packet_with_header)
+        else:
+            # Protocol V1/V2: raw opus data without header (for C3 mini etc)
+            if packet_index < 3:
+                hex_all = ' '.join(f'{b:02x}' for b in opus_packet[:20])
+                conn.logger.bind(tag=TAG).warning(f"SENDING V1 Frame #{packet_index}: {len(opus_packet)} bytes: [{hex_all}...]")
+
+            await conn.websocket.send(bytes(opus_packet))
 
     # 更新流控状态
     flow_control["packet_count"] = packet_index + 1

@@ -72,9 +72,10 @@ BARZELLETTE_BAMBINI_DESC = {
     "function": {
         "name": "barzelletta_bambini",
         "description": (
-            "讲儿童笑话 / Racconta una barzelletta per bambini. "
-            "当用户想要一个笑话适合儿童时使用。"
-            "Use when: 'barzelletta per bambini', 'joke for kids', 'racconta una barzelletta bambini'"
+            "Racconta una barzelletta divertente adatta ai bambini. "
+            "Usare quando: 'raccontami una barzelletta', 'dimmi una barzelletta per bambini', "
+            "'una battuta divertente', 'fammi ridere', 'una risata', 'barzelletta bambini', "
+            "'racconta qualcosa di buffo', 'una storia divertente', 'voglio ridere'"
         ),
         "parameters": {
             "type": "object",
@@ -89,10 +90,10 @@ BARZELLETTE_ADULTI_DESC = {
     "function": {
         "name": "barzelletta_adulti",
         "description": (
-            "讲成人笑话 / Racconta una barzelletta per adulti (spiritosa, non volgare). "
-            "当用户想要一个成人笑话、幽默的笑话时使用。"
-            "Use when: 'barzelletta sconce', 'barzelletta adulti', 'adult joke', 'dirty joke', "
-            "'barzelletta spinta', 'battuta per grandi'"
+            "Racconta una barzelletta spiritosa per adulti (umorismo sottile, non volgare). "
+            "Usare quando: 'barzelletta per adulti', 'una battuta per grandi', "
+            "'barzelletta spinta', 'barzelletta sconce', 'una battuta piccante', "
+            "'umorismo adulto', 'qualcosa di spiritoso', 'barzelletta da bar'"
         ),
         "parameters": {
             "type": "object",

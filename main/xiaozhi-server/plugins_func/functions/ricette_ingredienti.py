@@ -99,11 +99,9 @@ RICETTE_INGREDIENTI_FUNCTION_DESC = {
     "function": {
         "name": "ricette_ingredienti",
         "description": (
-            "根据食材搜索食谱 / Cerca ricette in base agli ingredienti disponibili. "
-            "Usa web search per trovare piatti da preparare con quello che hai in casa. "
-            "Use when: 'cosa posso cucinare con', 'ricette con', 'ho in casa', "
-            "'ingredienti disponibili', 'cosa preparo con', 'ricetta con quello che ho', "
-            "'che piatto faccio con', 'idee ricette ingredienti', 'cucina con'"
+            "Cerca ricette in base agli ingredienti disponibili. "
+            "Usare quando: 'cosa posso cucinare con', 'ricette con', 'ho in casa', "
+            "'cosa preparo con', 'ricetta con quello che ho', 'che piatto faccio con'"
         ),
         "parameters": {
             "type": "object",
