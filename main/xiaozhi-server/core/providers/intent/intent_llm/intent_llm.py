@@ -230,21 +230,29 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         def match_any(keywords):
             return any(kw in text_lower for kw in keywords)
 
-        # ============ STOP GLOBALE - FERMA QUALSIASI FUNZIONE ============
-        # Solo per comandi brevi e diretti (max 3 parole o frasi specifiche)
-        stop_keywords = ['stop', 'basta', 'fermati', 'smetti', 'esci', 'abbandona', 'annulla',
-                         'interrompi', 'torna indietro', 'fine']
-        stop_phrases = ['ferma tutto', 'stop tutto', 'cancella tutto', 'basta così',
-                        'ferma la radio', 'stop radio', 'ferma slideshow', 'ferma immagini',
-                        'spegni radio', 'spegni tutto']
+        # ============ SOMMARIO FUNZIONI (HELP) - PRIMA DI TUTTO ============
+        # Deve essere in cima perché "help", "aiuto" sono richieste importanti
+        if match_any(['sommario funzioni', 'elenco funzioni', 'lista funzioni', 'quali funzioni',
+                      'che funzioni hai', 'cosa sai fare', 'cosa puoi fare', 'funzionalità disponibili',
+                      'mostrami le funzioni', 'elenca funzioni']):
+            return '{"function_call": {"name": "sommario_funzioni"}}'
 
-        # Check frasi specifiche
+        # "help" e "aiuto" solo se sono la parola principale (non "aiutami a dormire")
+        if text_lower in ['help', 'aiuto', 'aiutami', 'guida']:
+            return '{"function_call": {"name": "sommario_funzioni"}}'
+
+        # ============ STOP GLOBALE - FERMA QUALSIASI FUNZIONE ============
+        # Frasi specifiche per fermare (NON "torna indietro" che è per navigazione)
+        stop_phrases = ['ferma tutto', 'stop tutto', 'cancella tutto', 'basta così',
+                        'ferma la radio', 'stop radio', 'spegni radio', 'spegni tutto',
+                        'ferma slideshow', 'ferma le immagini', 'stop immagini']
+
         if any(phrase in text_lower for phrase in stop_phrases):
             return '{"function_call": {"name": "handle_exit_intent"}}'
 
-        # Check comandi brevi (max 3 parole)
+        # Comandi singoli di stop (solo parola singola o due parole max)
         words = text_lower.split()
-        if len(words) <= 3 and any(kw in text_lower for kw in stop_keywords):
+        if len(words) <= 2 and text_lower in ['stop', 'basta', 'fermati', 'smetti', 'esci', 'fine']:
             return '{"function_call": {"name": "handle_exit_intent"}}'
 
         # ============ GESTIONE PROFILI SKILL ============
@@ -282,8 +290,11 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # Normalizza: "radiozeta" -> "radio zeta", "radioitalia" -> "radio italia"
         text_normalized = re.sub(r'radio(\w)', r'radio \1', text_lower)
 
+        # NOTA: "fammi sentire" è troppo generico - intercetta notizie/musica
+        # Usiamo solo pattern specifici per radio
         is_radio_request = match_any(['sintonizza', 'sintonizzati', 'metti radio', 'ascolta radio', 'accendi radio',
-                                      'fammi sentire', 'fammi ascoltare', 'fai partire'])
+                                      'metti la radio', 'accendi la radio', 'fammi sentire la radio',
+                                      'fammi ascoltare la radio', 'fai partire la radio'])
         if not is_radio_request:
             # Check se menziona una radio specifica
             for rname in radio_names:
@@ -403,9 +414,7 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ BARZELLETTE ============
         # NON matchare "raccontami una storia" (va a storie_bambini)
         if match_any(['barzelletta', 'battuta', 'fammi ridere', 'raccontami una barzelletta']):
-            if match_any(['adulti', 'spinta', 'sconce', 'per grandi']):
-                return '{"function_call": {"name": "barzelletta_adulti"}}'
-            return '{"function_call": {"name": "barzelletta_bambini"}}'
+            return '{"function_call": {"name": "barzellette"}}'
 
         # ============ TIMER/SVEGLIA ============
         if match_any(['timer', 'sveglia', 'svegliami', 'countdown']):
@@ -692,12 +701,8 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
                 cat_normalized = 'giochi' if cat == 'gioco' else cat
                 return f'{{"function_call": {{"name": "sommario_funzioni", "arguments": {{"categoria": "{cat_normalized}"}}}}}}'
 
-        # Poi controlla richieste generiche di elenco funzioni
-        if match_any(['quali funzioni', 'elenco funzioni', 'lista funzioni', 'funzionalità disponibili',
-                      'mostrami le funzioni', 'funzioni di', 'funzioni per', 'cosa fai con',
-                      'elenco funzionalita', 'elenco funzionalità', 'lista funzionalita', 'lista funzionalità',
-                      'che funzioni hai', 'che funzionalità hai', 'funzioni disponibili', 'help', 'aiuto']):
-            return '{"function_call": {"name": "sommario_funzioni"}}'
+        # NOTA: check generici ("cosa sai fare", "elenco funzioni", "help") sono in cima al file
+        # Qui solo categorie specifiche ("funzioni giochi", "funzioni audio")
 
         # ============ SUPPORTO EMOTIVO (ansia, paura - NON solitudine) ============
         if match_any(['ho paura', 'sono ansioso', 'ansia', 'panico', 'consolami', 'aiutami psicologicamente']):
