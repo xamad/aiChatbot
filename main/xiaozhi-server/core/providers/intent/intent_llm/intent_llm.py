@@ -60,7 +60,7 @@ User: "accendi la radio" -> {{"function_call": {{"name": "radio_italia", "argume
 User: "sintonizzati su radio zeta" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play", "station": "radio zeta"}}}}}}
 User: "metti radio deejay" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "play", "station": "radio deejay"}}}}}}
 User: "quali radio hai" -> {{"function_call": {{"name": "radio_italia", "arguments": {{"action": "list"}}}}}}
-User: "raccontami una barzelletta" -> {{"function_call": {{"name": "barzelletta_bambini"}}}}
+User: "raccontami una barzelletta" -> {{"function_call": {{"name": "barzellette"}}}}
 User: "Giannino" -> {{"function_call": {{"name": "giannino_easter_egg", "arguments": {{"domanda": "Giannino"}}}}}}
 User: "tu chi sei?" -> {{"function_call": {{"name": "chi_sono"}}}}
 User: "come ti chiami?" -> {{"function_call": {{"name": "chi_sono"}}}}
@@ -87,9 +87,9 @@ User: "aggiungi latte alla spesa" -> {{"function_call": {{"name": "shopping_voca
 User: "cosa devo comprare" -> {{"function_call": {{"name": "shopping_vocale", "arguments": {{"azione": "leggi"}}}}}}
 User: "traduci ciao in inglese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "ciao", "lingua_destinazione": "inglese"}}}}}}
 User: "come si dice grazie in francese" -> {{"function_call": {{"name": "traduttore_realtime", "arguments": {{"testo": "grazie", "lingua_destinazione": "francese"}}}}}}
-User: "fai un beatbox" -> {{"function_call": {{"name": "beatbox_umano"}}}}
-User: "fammi una base trap" -> {{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "trap"}}}}}}
-User: "beat hip hop" -> {{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "hip hop"}}}}}}
+User: "briefing del mattino" -> {{"function_call": {{"name": "briefing_mattutino"}}}}
+User: "routine mattutina" -> {{"function_call": {{"name": "routine_mattutina"}}}}
+User: "ginnastica dolce" -> {{"function_call": {{"name": "ginnastica_dolce"}}}}
 User: "cuciniamo la carbonara" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"ricetta": "carbonara"}}}}}}
 User: "prossimo step" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"azione": "avanti"}}}}}}
 User: "avanti con la ricetta" -> {{"function_call": {{"name": "cooking_companion", "arguments": {{"azione": "avanti"}}}}}}
@@ -254,6 +254,105 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         words = text_lower.split()
         if len(words) <= 2 and text_lower in ['stop', 'basta', 'fermati', 'smetti', 'esci', 'fine']:
             return '{"function_call": {"name": "handle_exit_intent"}}'
+
+        # ============ BRIEFING MATTUTINO ============
+        if match_any(['briefing mattutino', 'briefing del mattino', 'rassegna mattutina', 'buongiorno cosa c',
+                      'inizia la giornata', 'aggiornamento mattutino', 'notizie del mattino']):
+            return '{"function_call": {"name": "briefing_mattutino"}}'
+
+        # ============ ROUTINE MATTUTINA ============
+        if match_any(['routine mattutina', 'routine del mattino', 'inizia routine', 'attiva routine',
+                      'buongiorno routine', 'sveglia routine']):
+            return '{"function_call": {"name": "routine_mattutina"}}'
+
+        # ============ GINNASTICA DOLCE ============
+        if match_any(['ginnastica dolce', 'esercizi dolci', 'stretching mattutino', 'esercizi leggeri',
+                      'movimento dolce', 'ginnastica per anziani', 'esercizi soft']):
+            return '{"function_call": {"name": "ginnastica_dolce"}}'
+
+        # ============ CHECK BENESSERE ============
+        if match_any(['come mi sento', 'controllo benessere', 'check benessere', 'stato di salute',
+                      'come sto oggi', 'benessere quotidiano', 'monitora benessere']):
+            return '{"function_call": {"name": "check_benessere"}}'
+
+        # ============ ALLENAMENTO MENTALE ============
+        if match_any(['allenamento mentale', 'allena mente', 'brain training', 'esercizi mentali',
+                      'allena il cervello', 'training cognitivo', 'esercizi cognitivi']):
+            return '{"function_call": {"name": "allenamento_mentale"}}'
+
+        # ============ COMPLIMENTI ============
+        if match_any(['fammi un complimento', 'dimmi qualcosa di bello', 'complimentami', 'tirami su',
+                      'dì qualcosa di carino', 'fai un complimento', 'lusingami']):
+            return '{"function_call": {"name": "complimenti"}}'
+
+        # ============ DIARIO UMORE ============
+        if match_any(['diario umore', "come mi sono sentito", 'registra umore', 'traccia umore',
+                      'mood tracker', 'segna umore', 'diario emotivo', 'storico umore']):
+            return f'{{"function_call": {{"name": "diario_umore", "arguments": {{"umore": "{text}"}}}}}}'
+
+        # ============ DIARIO VOCALE ============
+        if match_any(['diario vocale', 'scrivi nel diario', 'registra nel diario', 'diario personale',
+                      'aggiungi al diario', 'pagina del diario', 'entry diario']):
+            return f'{{"function_call": {{"name": "diario_vocale", "arguments": {{"contenuto": "{text}"}}}}}}'
+
+        # ============ CONTA ACQUA ============
+        if match_any(['conta acqua', 'bicchiere acqua', 'ho bevuto', 'traccia acqua', 'water tracker',
+                      'quanta acqua', 'segnare acqua', 'bicchieri bevuti', 'idratazione']):
+            return '{"function_call": {"name": "conta_acqua"}}'
+
+        # ============ PROMEMORIA FARMACI ============
+        if match_any(['promemoria farmaci', 'promemoria medicine', 'ricordami la medicina', 'pillola',
+                      'devo prendere', 'farmaco', 'medicinale', 'prendi la pastiglia', 'orario medicine']):
+            return f'{{"function_call": {{"name": "promemoria_farmaci", "arguments": {{"farmaco": "{text}"}}}}}}'
+
+        # ============ EMERGENZA RAPIDA / SOS ============
+        if match_any(['emergenza', 'sos', 'aiuto emergenza', 'chiama aiuto', 'sto male', 'chiamate aiuto',
+                      'ho bisogno di aiuto', 'pronto soccorso', 'urgente']):
+            return '{"function_call": {"name": "sos_emergenza"}}'
+
+        # ============ INTRATTENITORE ANZIANI ============
+        if match_any(['intrattenimi', 'fai compagnia anziano', 'modalità anziani', 'programma anziani',
+                      'intrattenimento anziani', 'giochi per anziani', 'attività anziani']):
+            return '{"function_call": {"name": "intrattenitore_anziani"}}'
+
+        # ============ CHIACCHIERATA ============
+        if match_any(['chiacchieriamo', 'parliamo un po', 'facciamo due chiacchiere', 'voglio parlare',
+                      'conversiamo', 'chiacchierata', 'parla con me']):
+            return '{"function_call": {"name": "chiacchierata"}}'
+
+        # ============ GENERA RIME ============
+        if match_any(['genera rime', 'trova rime', 'rima con', 'parole che rimano', 'fammi una rima',
+                      'trova una rima', 'che rima fa']):
+            # Estrai parola
+            parola_match = re.search(r'(?:con|per|di)\s+(\w+)', text_lower)
+            parola = parola_match.group(1) if parola_match else ""
+            return f'{{"function_call": {{"name": "genera_rime", "arguments": {{"parola": "{parola}"}}}}}}'
+
+        # ============ LEGGI PAGINA WEB ============
+        if match_any(['leggi pagina', 'leggi sito', 'leggi url', 'leggi questa pagina', 'apri sito',
+                      'leggi link', 'leggi articolo', 'apri pagina web']):
+            return f'{{"function_call": {{"name": "leggi_pagina", "arguments": {{"url": "{text}"}}}}}}'
+
+        # ============ HOME ASSISTANT (HASS) ============
+        if match_any(['home assistant', 'hass', 'stato dispositivo', 'dispositivi casa', 'smart home status']):
+            if match_any(['stato', 'status', 'come sta', 'informazioni']):
+                return '{"function_call": {"name": "hass_get_state"}}'
+            if match_any(['imposta', 'cambia', 'modifica', 'setta']):
+                return f'{{"function_call": {{"name": "hass_set_state", "arguments": {{"comando": "{text}"}}}}}}'
+            if match_any(['inizializza', 'connetti', 'collega']):
+                return '{"function_call": {"name": "hass_init"}}'
+            if match_any(['musica', 'metti musica', 'riproduci']):
+                return f'{{"function_call": {{"name": "hass_play_music", "arguments": {{"query": "{text}"}}}}}}'
+            return '{"function_call": {"name": "hass_get_state"}}'
+
+        # ============ MEMORY VOCALE / USER MEMORY ============
+        if match_any(['memoria vocale', 'user memory', 'salvami questo', 'memorizza questo',
+                      'ricorda questa voce', 'nota vocale personale']):
+            return f'{{"function_call": {{"name": "memory_vocale", "arguments": {{"contenuto": "{text}"}}}}}}'
+
+        # ============ MESHTASTIC / LORA (fix nomi funzione) ============
+        # NOTA: La funzione nel config è "meshtastic_lora" ma in pattern usavamo nomi diversi
+        # Ri-mappiamo i pattern esistenti a meshtastic_lora
 
         # ============ GESTIONE PROFILI SKILL ============
         # NOTA: "modalità interprete" va a TRADUTTORE, "attiva modalità [profilo]" va qui
@@ -580,19 +679,19 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             if not msg_match:
                 msg_match = re.search(r'(?:manda|invia|trasmetti|scrivi|dì)\s+(?:messaggio\s+)?(?:mesh|lora|radio)?\s*[:\s]*(.+?)$', text_lower)
             messaggio = msg_match.group(1).strip() if msg_match else ""
-            return f'{{"function_call": {{"name": "invia_messaggio_mesh", "arguments": {{"messaggio": "{messaggio}"}}}}}}'
+            return f'{{"function_call": {{"name": "meshtastic_lora", "arguments": {{"azione": "invia", "messaggio": "{messaggio}"}}}}}}'
 
         # Leggi messaggi mesh
         if match_any(['leggi mesh', 'messaggi mesh', 'messaggi lora', 'cosa hanno scritto',
                       'nuovi messaggi radio', 'chi ha scritto mesh', 'messaggi radio',
                       'leggi lora', 'ci sono messaggi']):
-            return '{"function_call": {"name": "leggi_messaggi_mesh"}}'
+            return '{"function_call": {"name": "meshtastic_lora", "arguments": {"azione": "leggi"}}}'
 
         # Nodi mesh vicini
         if match_any(['nodi vicini', 'nodi mesh', "chi c'è sulla mesh", 'dispositivi lora',
                       'quanti nodi', 'distanza nodi', 'stato mesh', 'rete mesh',
                       'chi è connesso', 'nodi lora', 'chi vedi sulla rete']):
-            return '{"function_call": {"name": "nodi_mesh_vicini"}}'
+            return '{"function_call": {"name": "meshtastic_lora", "arguments": {"azione": "nodi"}}}'
 
         # ============ MEDITAZIONE ============
         if match_any(['meditazione', 'rilassamento', 'respirazione', 'mindfulness', 'rilassati']):
@@ -601,25 +700,6 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # ============ PODCAST ============
         if match_any(['podcast', 'ascolta podcast', 'metti podcast']):
             return '{"function_call": {"name": "podcast_italia", "arguments": {"action": "list"}}}'
-
-        # ============ BEATBOX ============
-        # Match diretto per beatbox - risposta immediata senza LLM
-        if match_any(['beatbox', 'beat box', 'fai un beat', 'fammi un beat', 'fammi una base',
-                      'base rap', 'base hip hop', 'base trap', 'boom tss', 'fai il rapper',
-                      'beatboxing', 'fai beatbox', 'fai il beat', 'facciamo beatbox']):
-            # Cerca stile specifico
-            stili = {'hip hop': 'hip hop', 'hiphop': 'hip hop', 'trap': 'trap', 'dubstep': 'dubstep',
-                     'drum and bass': 'drum and bass', 'dnb': 'drum and bass', 'reggaeton': 'reggaeton',
-                     'freestyle': 'freestyle', 'techno': 'techno', 'jazz': 'jazz', 'italiano': 'italiano',
-                     'robot': 'robot'}
-            stile = ""
-            for key, val in stili.items():
-                if key in text_lower:
-                    stile = val
-                    break
-            if stile:
-                return f'{{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "{stile}"}}}}}}'
-            return '{"function_call": {"name": "beatbox_umano"}}'
 
         # ============ LOTTO ============
         if match_any(['lotto', 'estrazione', 'numeri lotto', 'superenalotto']):
@@ -853,15 +933,6 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         # Pattern generici solo se espliciti
         if match_any(['fai il verso', 'imita un animale', 'animali da cortile', 'fai coccodè', 'fai muuu', 'fai bau', 'chicchirichì']):
             return '{"function_call": {"name": "versi_animali"}}'
-
-        # ============ BEATBOX UMANO ============
-        if match_any(['beatbox', 'fai un beat', 'fammi un beat', 'base rap', 'base trap', 'boom tss',
-                      'fai il rapper', 'beatboxing', 'fammi una base', 'beat hip hop', 'beat dubstep']):
-            stili = ['hip hop', 'trap', 'dubstep', 'drum', 'reggaeton', 'freestyle', 'techno', 'jazz', 'italiano', 'robot']
-            stile_match = next((s for s in stili if s in text_lower), "")
-            if stile_match:
-                return f'{{"function_call": {{"name": "beatbox_umano", "arguments": {{"stile": "{stile_match}"}}}}}}'
-            return '{"function_call": {"name": "beatbox_umano"}}'
 
         # ============ COOKING COMPANION (Guida Cucina Passo-Passo) ============
         if match_any(['cuciniamo', 'guidami in cucina', 'passo passo', 'step successivo', 'prossimo step',
