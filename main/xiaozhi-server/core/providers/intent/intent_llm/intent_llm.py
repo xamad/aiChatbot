@@ -230,6 +230,23 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
         def match_any(keywords):
             return any(kw in text_lower for kw in keywords)
 
+        # ============ STOP GLOBALE - FERMA QUALSIASI FUNZIONE ============
+        # Solo per comandi brevi e diretti (max 3 parole o frasi specifiche)
+        stop_keywords = ['stop', 'basta', 'fermati', 'smetti', 'esci', 'abbandona', 'annulla',
+                         'interrompi', 'torna indietro', 'fine']
+        stop_phrases = ['ferma tutto', 'stop tutto', 'cancella tutto', 'basta così',
+                        'ferma la radio', 'stop radio', 'ferma slideshow', 'ferma immagini',
+                        'spegni radio', 'spegni tutto']
+
+        # Check frasi specifiche
+        if any(phrase in text_lower for phrase in stop_phrases):
+            return '{"function_call": {"name": "handle_exit_intent"}}'
+
+        # Check comandi brevi (max 3 parole)
+        words = text_lower.split()
+        if len(words) <= 3 and any(kw in text_lower for kw in stop_keywords):
+            return '{"function_call": {"name": "handle_exit_intent"}}'
+
         # ============ GESTIONE PROFILI SKILL ============
         # NOTA: "modalità interprete" va a TRADUTTORE, "attiva modalità [profilo]" va qui
         # Escludiamo esplicitamente "interprete" dal match "attiva modalità" per evitare conflitti
@@ -298,15 +315,19 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
             return result
 
         # ============ METEO ============
-        if match_any(['che tempo fa', 'meteo', 'previsioni', 'piove', 'temperatura', 'come sarà il tempo']):
-            city_match = re.search(r'(?:a|di|per|su)\s+(\w+)', text_lower)
-            city = city_match.group(1) if city_match else ""
+        if match_any(['che tempo fa', 'meteo', 'previsioni', 'piove', 'temperatura', 'come sarà il tempo',
+                      'che tempo', 'tempo domani', 'tempo oggi', 'pioverà', 'farà caldo', 'farà freddo']):
+            # Estrai città - supporta nomi con più parole
+            city_match = re.search(r'(?:a|di|per|su|in)\s+([a-zàèéìòùç\s]+?)(?:\s+(?:domani|oggi|prossimi|nei)|\?|$)', text_lower)
+            city = city_match.group(1).strip() if city_match else ""
             result = f'{{"function_call": {{"name": "meteo_italia", "arguments": {{"city": "{city}"}}}}}}'
             logger.bind(tag=TAG).debug(f"Pre-check: meteo -> {result}")
             return result
 
         # ============ NOTIZIE ============
-        if match_any(['notizie', 'ultime news', 'cosa succede', 'telegiornale', 'rassegna stampa']):
+        if match_any(['notizie', 'ultime notizie', 'news', 'ultime news', 'cosa succede', 'telegiornale',
+                      'rassegna stampa', 'dimmi le notizie', 'fammi sentire le notizie', 'leggi le notizie',
+                      'giornale', 'cosa è successo', 'novità']):
             return '{"function_call": {"name": "notizie_italia", "arguments": {"action": "headlines"}}}'
 
         # ============ SMART FRIDGE ============
@@ -341,6 +362,43 @@ OUTPUT FORMAT: Return ONLY the JSON object. No markdown, no explanation, no text
                 return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "inventario"}}}'
             # Default: statistiche
             return '{"function_call": {"name": "smart_fridge", "arguments": {"azione": "statistiche"}}}'
+
+        # ============ CERCA IMMAGINI ============
+        if match_any(['cerca immagini', 'cerca foto', 'mostrami immagini', 'mostrami foto',
+                      'fammi vedere immagini', 'fammi vedere foto', 'slideshow', 'slideshow di',
+                      'immagini di', 'foto di']):
+            # Estrai query dall'input
+            query_match = re.search(r'(?:di|su|per|con)\s+(.+)', text_lower)
+            if query_match:
+                query = query_match.group(1).strip()
+                return f'{{"function_call": {{"name": "cerca_immagini", "arguments": {{"azione": "cerca", "query": "{query}"}}}}}}'
+            return '{"function_call": {"name": "cerca_immagini", "arguments": {"azione": "cerca"}}}'
+
+        # Navigazione slideshow
+        if match_any(['prossima immagine', 'immagine successiva', 'avanti immagine', 'next image']):
+            return '{"function_call": {"name": "cerca_immagini", "arguments": {"azione": "prossima"}}}'
+        if match_any(['immagine precedente', 'indietro immagine', 'torna indietro']):
+            return '{"function_call": {"name": "cerca_immagini", "arguments": {"azione": "precedente"}}}'
+
+        # ============ CERCA GIF ============
+        if match_any(['cerca gif', 'mostrami gif', 'fammi vedere gif', 'gif di', 'gif animate']):
+            query_match = re.search(r'(?:di|su|per|con)\s+(.+)', text_lower)
+            if query_match:
+                query = query_match.group(1).strip()
+                return f'{{"function_call": {{"name": "cerca_gif", "arguments": {{"azione": "cerca", "query": "{query}"}}}}}}'
+            return '{"function_call": {"name": "cerca_gif", "arguments": {"azione": "cerca"}}}'
+
+        if match_any(['gif trending', 'gif popolari', 'gif del momento']):
+            return '{"function_call": {"name": "cerca_gif", "arguments": {"azione": "trending"}}}'
+
+        # ============ CERCA MUSICA WEB ============
+        if match_any(['cerca musica', 'cerca canzone', 'trova musica', 'trova canzone',
+                      'metti musica', 'fammi sentire musica', 'scarica musica', 'download musica']):
+            query_match = re.search(r'(?:di|su|per|con|intitolata|chiamata)\s+(.+)', text_lower)
+            if query_match:
+                query = query_match.group(1).strip()
+                return f'{{"function_call": {{"name": "cerca_musica_web", "arguments": {{"query": "{query}"}}}}}}'
+            return '{"function_call": {"name": "cerca_musica_web"}}'
 
         # ============ BARZELLETTE ============
         # NON matchare "raccontami una storia" (va a storie_bambini)
