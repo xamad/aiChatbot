@@ -7,9 +7,9 @@ Invia animazione cuore al display ESP32!
 
 import os
 import json
-import asyncio
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
+from core.utils.display_animations import send_animation
 
 TAG = __name__
 logger = setup_logging()
@@ -48,27 +48,6 @@ def load_giannino_phrases():
 RISPOSTA_GIANNINI, VARIANTI = load_giannino_phrases()
 
 
-def send_heart_animation(conn):
-    """Invia animazione cuore al display ESP32"""
-    try:
-        if hasattr(conn, 'websocket') and conn.websocket:
-            message = {
-                "type": "special_animation",
-                "animation": "heart"
-            }
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    conn.websocket.send(json.dumps(message)),
-                    loop
-                )
-                logger.bind(tag=TAG).info("Animazione cuore inviata al display!")
-            else:
-                # Fallback sincrono
-                asyncio.run(conn.websocket.send(json.dumps(message)))
-    except Exception as e:
-        logger.bind(tag=TAG).debug(f"Errore invio animazione cuore: {e}")
-
 GIANNINI_FUNCTION_DESC = {
     "type": "function",
     "function": {
@@ -96,7 +75,7 @@ def giannino_easter_egg(conn, domanda: str = None):
     logger.bind(tag=TAG).info(f"Easter egg GIANNINI attivato! Domanda: {domanda}")
 
     # ====== INVIA ANIMAZIONE CUORE AL DISPLAY! ======
-    send_heart_animation(conn)
+    send_animation(conn, "heart")
 
     # Ricarica frasi ad ogni chiamata per permettere modifica in tempo reale
     risposta_main, varianti = load_giannino_phrases()

@@ -11,6 +11,7 @@ from plugins_func.register import register_function, ToolType, ActionResponse, A
 from core.handle.sendAudioHandle import send_stt_message
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
+from core.utils.display_animations import send_animation, stop_animation
 
 TAG = __name__
 logger = setup_logging()
@@ -403,6 +404,7 @@ def radio_italia(conn, action: str = "list", station: str = None):
         return ActionResponse(Action.RESPONSE, result, None)
 
     if action == "stop":
+        stop_animation(conn)  # Ferma animazione radio
         return ActionResponse(Action.RESPONSE, "Radio fermata!", None)
 
     if action == "play":
@@ -418,6 +420,9 @@ def radio_italia(conn, action: str = "list", station: str = None):
 
         # Avvia cattura e riproduzione in background
         conn.loop.create_task(capture_and_play_radio(conn, found))
+
+        # Invia animazione radio al display
+        send_animation(conn, "radio")
 
         # IMPORTANTE: Action.RESPONSE per evitare che l'LLM aggiunga domande
         # Il terzo parametro è il testo PARLATO - deve essere uguale al testo mostrato
@@ -543,6 +548,8 @@ async def capture_and_play_radio(conn, station: dict):
                 except Exception:
                     pass
 
+        # Ferma animazione radio
+        stop_animation(conn)
         logger.bind(tag=TAG).info(f"Streaming {station_name} completato")
 
     except Exception as e:
