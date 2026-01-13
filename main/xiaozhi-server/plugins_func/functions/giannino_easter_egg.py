@@ -2,10 +2,12 @@
 GIANNINI Easter Egg Plugin - Funzionalità nascosta EPICA!
 Risponde a domande su Giannini con voce eccitata
 Le frasi sono configurabili via WebUI in /config
+Invia animazione cuore al display ESP32!
 """
 
 import os
 import json
+import asyncio
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 
@@ -45,6 +47,28 @@ def load_giannino_phrases():
 # Carica frasi (ricaricate ad ogni chiamata per permettere modifica in tempo reale)
 RISPOSTA_GIANNINI, VARIANTI = load_giannino_phrases()
 
+
+def send_heart_animation(conn):
+    """Invia animazione cuore al display ESP32"""
+    try:
+        if hasattr(conn, 'websocket') and conn.websocket:
+            message = {
+                "type": "special_animation",
+                "animation": "heart"
+            }
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    conn.websocket.send(json.dumps(message)),
+                    loop
+                )
+                logger.bind(tag=TAG).info("Animazione cuore inviata al display!")
+            else:
+                # Fallback sincrono
+                asyncio.run(conn.websocket.send(json.dumps(message)))
+    except Exception as e:
+        logger.bind(tag=TAG).debug(f"Errore invio animazione cuore: {e}")
+
 GIANNINI_FUNCTION_DESC = {
     "type": "function",
     "function": {
@@ -70,6 +94,9 @@ GIANNINI_FUNCTION_DESC = {
 @register_function("giannino_easter_egg", GIANNINI_FUNCTION_DESC, ToolType.WAIT)
 def giannino_easter_egg(conn, domanda: str = None):
     logger.bind(tag=TAG).info(f"Easter egg GIANNINI attivato! Domanda: {domanda}")
+
+    # ====== INVIA ANIMAZIONE CUORE AL DISPLAY! ======
+    send_heart_animation(conn)
 
     # Ricarica frasi ad ogni chiamata per permettere modifica in tempo reale
     risposta_main, varianti = load_giannino_phrases()
