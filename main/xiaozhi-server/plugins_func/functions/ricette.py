@@ -116,10 +116,35 @@ def format_recipe(meal: dict) -> str:
     return result
 
 
+def format_recipe_spoken(meal: dict) -> str:
+    """Formatta una ricetta per la lettura vocale"""
+    spoken = f"Ecco la ricetta: {meal['strMeal']}. "
+
+    # Ingredienti principali (max 5)
+    ingredients = []
+    for i in range(1, 6):
+        ingredient = meal.get(f"strIngredient{i}")
+        if ingredient and ingredient.strip():
+            ingredients.append(ingredient)
+
+    if ingredients:
+        spoken += f"Ingredienti principali: {', '.join(ingredients)}. "
+
+    # Istruzioni brevi
+    instructions = meal.get("strInstructions", "")
+    if instructions:
+        # Solo prima frase
+        first_sentence = instructions.split('.')[0]
+        spoken += f"Preparazione: {first_sentence}."
+
+    return spoken
+
+
 @register_function("ricette", RICETTE_FUNCTION_DESC, ToolType.SYSTEM_CTL)
 def ricette(conn, query: str, tipo: str = "piatto"):
     if not query:
-        return ActionResponse(Action.REQLLM, "Cosa vuoi cucinare?", None)
+        msg = "Cosa vuoi cucinare? Dimmi il nome di un piatto!"
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     logger.bind(tag=TAG).info(f"Ricerca ricetta: '{query}' (tipo={tipo})")
 
@@ -137,29 +162,28 @@ def ricette(conn, query: str, tipo: str = "piatto"):
             meals = search_by_name(query_en)
 
     if not meals:
-        return ActionResponse(
-            Action.REQLLM,
-            f"Nessuna ricetta trovata per '{query}'. Prova con un altro termine!",
-            None
-        )
+        msg = f"Nessuna ricetta trovata per {query}. Prova con un altro termine!"
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     # Se abbiamo solo ID, ottieni dettagli
+    meal = None
     if meals and "strInstructions" not in meals[0]:
         meal = get_recipe_details(meals[0]["idMeal"])
-        if meal:
-            result = format_recipe(meal)
-            return ActionResponse(Action.REQLLM, result, None)
+    else:
+        meal = meals[0] if meals else None
 
-    # Formatta il primo risultato con dettagli
-    if meals:
-        result = format_recipe(meals[0])
+    if meal:
+        result = format_recipe(meal)
+        spoken = format_recipe_spoken(meal)
 
         # Aggiungi altre opzioni se disponibili
         if len(meals) > 1:
             result += "\n**Altre ricette simili:** "
             others = [m["strMeal"] for m in meals[1:4]]
             result += ", ".join(others)
+            spoken += f" Altre opzioni: {', '.join(others)}."
 
-        return ActionResponse(Action.REQLLM, result, None)
+        return ActionResponse(Action.RESPONSE, result, spoken)
 
-    return ActionResponse(Action.REQLLM, "Errore nella ricerca", None)
+    msg = "Errore nella ricerca ricette."
+    return ActionResponse(Action.RESPONSE, msg, msg)

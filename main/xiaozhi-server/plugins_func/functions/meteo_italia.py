@@ -88,39 +88,53 @@ def get_weather(lat: float, lon: float) -> dict:
 @register_function("meteo_italia", METEO_ITALIA_FUNCTION_DESC, ToolType.SYSTEM_CTL)
 def meteo_italia(conn, city: str):
     if not city:
-        return ActionResponse(Action.REQLLM, "Specifica una città", None)
+        msg = "Per quale città vuoi sapere il meteo?"
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     location = geocode_city(city)
     if not location:
-        return ActionResponse(Action.REQLLM, f"Città '{city}' non trovata", None)
+        msg = f"Non ho trovato la città {city}. Prova con un altro nome."
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     weather = get_weather(location["lat"], location["lon"])
     if not weather:
-        return ActionResponse(Action.REQLLM, "Errore meteo, riprova", None)
+        msg = "Errore nel recuperare il meteo. Riprova tra poco."
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     current = weather.get("current", {})
     daily = weather.get("daily", {})
 
     temp = current.get("temperature_2m", "?")
     code = current.get("weather_code", 0)
-    desc = WMO_CODES.get(code, "Sconosciuto")
+    desc = WMO_CODES.get(code, "Variabile")
     wind = current.get("wind_speed_10m", "?")
 
     loc_name = f"{location['name']}, {location['region']}"
 
+    # Report per display (con formattazione)
     report = f"**Meteo {loc_name}**\n\n"
     report += f"Ora: {desc}, {temp}°C, vento {wind} km/h\n\n"
     report += "Prossimi giorni:\n"
 
-    days = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
-    for i, date in enumerate(daily.get("time", [])[:5]):
+    days = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+    days_short = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+
+    forecast_spoken = ""
+    for i, date in enumerate(daily.get("time", [])[:3]):  # Solo 3 giorni per voce
         from datetime import datetime
         dt = datetime.strptime(date, "%Y-%m-%d")
-        day = days[dt.weekday()]
+        day = days_short[dt.weekday()]
+        day_full = days[dt.weekday()]
         tmin = daily["temperature_2m_min"][i]
         tmax = daily["temperature_2m_max"][i]
         code = daily["weather_code"][i]
-        desc = WMO_CODES.get(code, "")
-        report += f"- {day}: {desc}, {tmin}°-{tmax}°C\n"
+        day_desc = WMO_CODES.get(code, "variabile")
+        report += f"- {day}: {day_desc}, {tmin}°-{tmax}°C\n"
+        forecast_spoken += f"{day_full} {day_desc} con {tmin} e {tmax} gradi. "
 
-    return ActionResponse(Action.REQLLM, report, None)
+    # Versione parlata (fluida)
+    spoken = f"A {location['name']} adesso è {desc} con {temp} gradi. "
+    spoken += f"Vento a {wind} chilometri orari. "
+    spoken += f"Previsioni: {forecast_spoken}"
+
+    return ActionResponse(Action.RESPONSE, report, spoken)

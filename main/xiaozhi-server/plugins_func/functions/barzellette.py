@@ -109,7 +109,8 @@ def barzelletta_bambini(conn):
     """Racconta una barzelletta per bambini"""
     joke = random.choice(BARZELLETTE_BAMBINI)
     logger.bind(tag=TAG).info("Barzelletta bambini richiesta")
-    return ActionResponse(Action.REQLLM, f"🎈 Ecco una barzelletta per te!\n\n{joke}", None)
+    spoken = f"Ecco una barzelletta! {joke}"
+    return ActionResponse(Action.RESPONSE, f"🎈 {joke}", spoken)
 
 
 @register_function("barzelletta_adulti", BARZELLETTE_ADULTI_DESC, ToolType.SYSTEM_CTL)
@@ -117,4 +118,35 @@ def barzelletta_adulti(conn):
     """Racconta una barzelletta per adulti"""
     joke = random.choice(BARZELLETTE_ADULTI)
     logger.bind(tag=TAG).info("Barzelletta adulti richiesta")
-    return ActionResponse(Action.REQLLM, f"😏 Eccone una per te!\n\n{joke}", None)
+    spoken = f"Eccone una per te! {joke}"
+    return ActionResponse(Action.RESPONSE, f"😏 {joke}", spoken)
+
+
+# ============ BARZELLETTE GENERICO (per pattern "barzellette") ============
+BARZELLETTE_DESC = {
+    "type": "function",
+    "function": {
+        "name": "barzellette",
+        "description": (
+            "Racconta una barzelletta divertente. "
+            "TRIGGER: 'barzelletta', 'raccontami una barzelletta', 'fammi ridere', "
+            "'una battuta', 'voglio ridere', 'dimmi qualcosa di divertente'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+
+@register_function("barzellette", BARZELLETTE_DESC, ToolType.SYSTEM_CTL)
+def barzellette(conn):
+    """Racconta una barzelletta (sceglie casualmente)"""
+    # Mix di barzellette adatte a tutti
+    all_jokes = BARZELLETTE_BAMBINI + BARZELLETTE_ADULTI[:10]  # Solo le meno spinte
+    joke = random.choice(all_jokes)
+    logger.bind(tag=TAG).info("Barzelletta richiesta")
+    spoken = f"Ecco una barzelletta! {joke}"
+    return ActionResponse(Action.RESPONSE, f"😄 {joke}", spoken)

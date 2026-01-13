@@ -129,19 +129,22 @@ def notizie_italia(conn, categoria: str = "cronaca", fonte: str = "ansa", num_no
     news = fetch_rss_news(url, num_notizie)
 
     if not news:
-        return ActionResponse(
-            Action.REQLLM,
-            f"Non sono riuscito a recuperare le notizie da {fonte}. Riprova più tardi.",
-            None
-        )
+        msg = f"Non sono riuscito a recuperare le notizie da {fonte}. Riprova più tardi."
+        return ActionResponse(Action.RESPONSE, msg, msg)
 
     fonte_nome = {"ansa": "ANSA", "repubblica": "Repubblica", "corriere": "Corriere della Sera"}
-    result = f"📰 **Ultime notizie {categoria.upper()}** da {fonte_nome.get(fonte, fonte)}:\n\n"
 
+    # Testo per display (con formattazione)
+    result = f"📰 **Ultime notizie {categoria.upper()}** da {fonte_nome.get(fonte, fonte)}:\n\n"
     for i, item in enumerate(news, 1):
         result += f"{i}. **{item['title']}**\n"
         if item['description']:
             result += f"   {item['description']}\n"
         result += "\n"
 
-    return ActionResponse(Action.REQLLM, result, None)
+    # Testo per voce (fluido, senza formattazione)
+    spoken = f"Ecco le ultime notizie {categoria} da {fonte_nome.get(fonte, fonte)}. "
+    for i, item in enumerate(news, 1):
+        spoken += f"Notizia {i}: {item['title']}. "
+
+    return ActionResponse(Action.RESPONSE, result, spoken)

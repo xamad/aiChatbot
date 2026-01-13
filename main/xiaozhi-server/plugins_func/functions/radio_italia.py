@@ -432,7 +432,8 @@ def radio_italia(conn, action: str = "list", station: str = None):
             f"Sintonizzazione su {found['name']}... un momento!"
         )
 
-    return ActionResponse(Action.REQLLM, "Azione non riconosciuta", None)
+    msg = "Non ho capito cosa vuoi fare con la radio. Prova: metti radio deejay, oppure elenco radio."
+    return ActionResponse(Action.RESPONSE, msg, msg)
 
 
 def get_audio_duration(file_path: str) -> float:
