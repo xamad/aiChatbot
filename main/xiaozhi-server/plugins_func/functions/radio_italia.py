@@ -17,8 +17,28 @@ logger = setup_logging()
 
 # Directory cache radio
 RADIO_CACHE_DIR = "/tmp/xiaozhi_radio"
-CHUNK_DURATION = 10  # Secondi per chunk (partenza veloce ~10-15 sec attesa)
-MAX_CONTINUOUS_CHUNKS = 60  # Max chunk per sessione (60 x 10s = 10 minuti totali)
+CHUNK_DURATION = 15  # Secondi per chunk (più lungo = meno transizioni = più fluido)
+MAX_CONTINUOUS_CHUNKS = 40  # Max chunk per sessione (40 x 15s = 10 minuti totali)
+
+
+def cleanup_radio_cache():
+    """Pulisce file radio vecchi all'avvio"""
+    try:
+        if os.path.exists(RADIO_CACHE_DIR):
+            import glob
+            old_files = glob.glob(os.path.join(RADIO_CACHE_DIR, "*.mp3"))
+            for f in old_files:
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+            logger.bind(tag=TAG).debug(f"Puliti {len(old_files)} file radio cache")
+    except Exception:
+        pass
+
+
+# Pulisci cache all'import del modulo
+cleanup_radio_cache()
 
 # Stazioni radio italiane con stream URL verificati (Gennaio 2026)
 # Mix di stream MP3 diretti e HLS (m3u8)
@@ -410,8 +430,26 @@ def radio_italia(conn, action: str = "list", station: str = None):
     return ActionResponse(Action.REQLLM, "Azione non riconosciuta", None)
 
 
+def get_audio_duration(file_path: str) -> float:
+    """Ottiene la durata effettiva del file audio in secondi"""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+            capture_output=True, text=True, timeout=10
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return CHUNK_DURATION  # Fallback alla durata nominale
+
+
 async def capture_and_play_radio(conn, station: dict):
-    """Cattura e riproduce chunk radio in streaming progressivo"""
+    """
+    Cattura e riproduce chunk radio con DOUBLE BUFFERING.
+    - Mentre un chunk è in riproduzione, il successivo viene scaricato
+    - Aspetta la durata effettiva del chunk prima di accodare il prossimo
+    - Pulisce i file già riprodotti per risparmiare spazio
+    """
     try:
         station_name = station["name"]
         url = station["url"]
@@ -422,41 +460,88 @@ async def capture_and_play_radio(conn, station: dict):
         safe_name = station_name.lower().replace(" ", "_").replace(".", "")
         loop = asyncio.get_event_loop()
 
-        # Streaming progressivo: scarica e riproduci chunk uno alla volta
+        # ====== DOUBLE BUFFER: Scarica il primo chunk in anticipo ======
+        buffer_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}_buffer.mp3")
+        current_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}_current.mp3")
+
+        # Pre-scarica primo chunk
+        logger.bind(tag=TAG).info(f"Pre-buffering {station_name}...")
+        first_success = await loop.run_in_executor(
+            None,
+            lambda: capture_radio_chunk(url, buffer_path, CHUNK_DURATION, referer)
+        )
+
+        if not first_success or not os.path.exists(buffer_path):
+            await send_stt_message(conn, f"Non riesco a sintonizzare {station_name}")
+            return
+
+        # ====== STREAMING LOOP con double buffering ======
         for chunk_num in range(MAX_CONTINUOUS_CHUNKS):
-            # Verifica se la connessione è ancora attiva
+            # Verifica connessione attiva
             if not hasattr(conn, 'websocket') or conn.websocket is None:
                 logger.bind(tag=TAG).warning("Connessione chiusa, fermo radio")
                 break
 
             try:
-                # Controlla stato websocket
                 if hasattr(conn.websocket, 'closed') and conn.websocket.closed:
                     logger.bind(tag=TAG).warning("WebSocket chiuso, fermo radio")
                     break
             except Exception:
                 pass
 
-            output_path = os.path.join(RADIO_CACHE_DIR, f"{safe_name}_{chunk_num}.mp3")
+            # ====== SWAP: buffer -> current ======
+            if os.path.exists(current_path):
+                os.remove(current_path)
+            if os.path.exists(buffer_path):
+                os.rename(buffer_path, current_path)
+            else:
+                logger.bind(tag=TAG).error("Buffer vuoto, stop streaming")
+                break
 
-            # Scarica chunk
-            success = await loop.run_in_executor(
-                None,
-                lambda p=output_path: capture_radio_chunk(url, p, CHUNK_DURATION, referer)
+            # Ottieni durata effettiva del chunk corrente
+            chunk_duration = get_audio_duration(current_path)
+            logger.bind(tag=TAG).debug(f"Chunk {chunk_num} durata: {chunk_duration:.1f}s")
+
+            # ====== AVVIA DOWNLOAD PROSSIMO CHUNK IN BACKGROUND ======
+            # NOTA: Inizia download SUBITO, non aspetta - così il buffer si riempie
+            # mentre l'audio corrente è in riproduzione
+            download_task = asyncio.ensure_future(
+                loop.run_in_executor(
+                    None,
+                    lambda: capture_radio_chunk(url, buffer_path, CHUNK_DURATION, referer)
+                )
             )
 
-            if success and os.path.exists(output_path):
-                # Riproduci chunk
-                await play_radio_chunk(conn, output_path, station_name, is_first=(chunk_num == 0))
-                logger.bind(tag=TAG).info(f"Radio chunk {chunk_num + 1}/{MAX_CONTINUOUS_CHUNKS} riprodotto")
+            # ====== RIPRODUCI CHUNK CORRENTE ======
+            await play_radio_chunk(conn, current_path, station_name, is_first=(chunk_num == 0))
+            logger.bind(tag=TAG).info(f"Radio chunk {chunk_num + 1}/{MAX_CONTINUOUS_CHUNKS} in riproduzione")
 
-                # Breve pausa tra chunk per permettere riproduzione
-                await asyncio.sleep(1)
-            else:
-                logger.bind(tag=TAG).error(f"Chunk {chunk_num} fallito")
-                if chunk_num == 0:
-                    await send_stt_message(conn, f"Non riesco a sintonizzare {station_name}")
-                break
+            # ====== ASPETTA DURATA CHUNK (con margine per evitare gap) ======
+            # Aspettiamo ~80% della durata per dare tempo al buffer di riempirsi
+            wait_time = max(chunk_duration * 0.85, 5.0)
+            logger.bind(tag=TAG).debug(f"Attendo {wait_time:.1f}s prima del prossimo chunk")
+            await asyncio.sleep(wait_time)
+
+            # ====== VERIFICA DOWNLOAD COMPLETATO ======
+            try:
+                download_success = await asyncio.wait_for(download_task, timeout=30)
+                if not download_success:
+                    logger.bind(tag=TAG).warning("Download chunk fallito, riprovo...")
+                    # Riprova una volta
+                    await loop.run_in_executor(
+                        None,
+                        lambda: capture_radio_chunk(url, buffer_path, CHUNK_DURATION, referer)
+                    )
+            except asyncio.TimeoutError:
+                logger.bind(tag=TAG).warning("Download timeout, continuo comunque")
+
+        # Cleanup finale
+        for f in [buffer_path, current_path]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
 
         logger.bind(tag=TAG).info(f"Streaming {station_name} completato")
 
