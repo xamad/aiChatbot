@@ -23,6 +23,7 @@ public:
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
+    virtual void SetWebSocketConnected(bool connected) override;
     virtual bool SnapshotToJpeg(std::string& jpeg_data, int quality = 80);
 
 protected:
@@ -30,16 +31,19 @@ protected:
     lv_display_t *display_ = nullptr;
 
     lv_obj_t *network_label_ = nullptr;
+    lv_obj_t *websocket_label_ = nullptr;
     lv_obj_t *status_label_ = nullptr;
     lv_obj_t *notification_label_ = nullptr;
     lv_obj_t *mute_label_ = nullptr;
     lv_obj_t *battery_label_ = nullptr;
     lv_obj_t* low_battery_popup_ = nullptr;
     lv_obj_t* low_battery_label_ = nullptr;
-    
+
     const char* battery_icon_ = nullptr;
     const char* network_icon_ = nullptr;
+    const char* websocket_icon_ = nullptr;
     bool muted_ = false;
+    bool websocket_connected_ = false;
 
     std::chrono::system_clock::time_point last_status_update_time_;
     esp_timer_handle_t notification_timer_ = nullptr;

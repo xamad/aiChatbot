@@ -17,7 +17,63 @@ WebsocketProtocol::WebsocketProtocol() {
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
+    StopKeepAliveTimer();
+    if (keepalive_timer_ != nullptr) {
+        xTimerDelete(keepalive_timer_, pdMS_TO_TICKS(100));
+        keepalive_timer_ = nullptr;
+    }
     vEventGroupDelete(event_group_handle_);
+}
+
+void WebsocketProtocol::EnableKeepAlive(bool enable) {
+    keepalive_enabled_ = enable;
+    ESP_LOGI(TAG, "WebSocket keep-alive %s", enable ? "enabled" : "disabled");
+}
+
+bool WebsocketProtocol::IsConnectionAlive() const {
+    return websocket_ != nullptr && websocket_->IsConnected();
+}
+
+void WebsocketProtocol::KeepAliveTimerCallback(TimerHandle_t timer) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(pvTimerGetTimerID(timer));
+    if (self != nullptr) {
+        self->SendKeepAlivePing();
+    }
+}
+
+void WebsocketProtocol::SendKeepAlivePing() {
+    if (websocket_ != nullptr && websocket_->IsConnected()) {
+        websocket_->Ping();
+        ESP_LOGD(TAG, "Keep-alive ping sent");
+    }
+}
+
+void WebsocketProtocol::StartKeepAliveTimer() {
+    if (!keepalive_enabled_) {
+        return;
+    }
+
+    if (keepalive_timer_ == nullptr) {
+        keepalive_timer_ = xTimerCreate(
+            "ws_keepalive",
+            pdMS_TO_TICKS(WEBSOCKET_KEEPALIVE_INTERVAL_MS),
+            pdTRUE,  // Auto-reload
+            this,    // Timer ID (used to pass context)
+            KeepAliveTimerCallback
+        );
+    }
+
+    if (keepalive_timer_ != nullptr) {
+        xTimerStart(keepalive_timer_, pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "Keep-alive timer started (%d ms interval)", WEBSOCKET_KEEPALIVE_INTERVAL_MS);
+    }
+}
+
+void WebsocketProtocol::StopKeepAliveTimer() {
+    if (keepalive_timer_ != nullptr) {
+        xTimerStop(keepalive_timer_, pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "Keep-alive timer stopped");
+    }
 }
 
 bool WebsocketProtocol::Start() {
@@ -82,10 +138,21 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    return websocket_ != nullptr && websocket_->IsConnected() && audio_channel_active_ && !error_occurred_ && !IsTimeout();
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
+    audio_channel_active_ = false;
+
+    // If keep-alive is enabled, keep the connection open for reuse
+    if (keepalive_enabled_ && websocket_ != nullptr && websocket_->IsConnected()) {
+        ESP_LOGI(TAG, "Keep-alive mode: keeping WebSocket connection open");
+        // Keep the timer running to maintain connection
+        return;
+    }
+
+    // Otherwise close the connection
+    StopKeepAliveTimer();
     websocket_.reset();
 }
 
@@ -99,7 +166,35 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    audio_channel_active_ = true;
 
+    // Check if we can reuse existing connection (keep-alive mode)
+    if (keepalive_enabled_ && websocket_ != nullptr && websocket_->IsConnected()) {
+        ESP_LOGI(TAG, "Reusing existing WebSocket connection (keep-alive mode)");
+
+        // Just send hello to start new session
+        auto message = GetHelloMessage();
+        ESP_LOGI(TAG, "Sending hello (reuse): %s", message.c_str());
+        if (!SendText(message)) {
+            ESP_LOGE(TAG, "Failed to send hello message on reused connection");
+            // Connection might be stale, force reconnect
+            websocket_.reset();
+        } else {
+            // Wait for server hello
+            EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
+            if (bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT) {
+                ESP_LOGI(TAG, "Successfully reused connection - session started");
+                if (on_audio_channel_opened_ != nullptr) {
+                    on_audio_channel_opened_();
+                }
+                return true;
+            }
+            ESP_LOGW(TAG, "Server hello timeout on reused connection, reconnecting...");
+            websocket_.reset();
+        }
+    }
+
+    // Create new connection
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
     if (websocket_ == nullptr) {
@@ -176,6 +271,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     websocket_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Websocket disconnected");
+        audio_channel_active_ = false;
+        StopKeepAliveTimer();
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_();
         }
@@ -204,6 +301,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
         SetError(Lang::Strings::SERVER_TIMEOUT);
         return false;
     }
+
+    // Start keep-alive timer if enabled
+    StartKeepAliveTimer();
 
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();

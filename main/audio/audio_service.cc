@@ -80,41 +80,44 @@ void AudioService::Start() {
     esp_timer_start_periodic(audio_power_timer_, 1000000);
 
 #if CONFIG_USE_AUDIO_PROCESSOR
-    /* Start the audio input task */
+    /* Start the audio input task - pinned to core 0 for AFE processing */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
     }, "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 0);
 
-    /* Start the audio output task - needs large stack for Write() buffer */
-    xTaskCreate([](void* arg) {
+    /* Start the audio output task - pinned to core 1 for parallel processing
+     * Increased priority to 7 for better audio playback performance */
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 6, this, 4, &audio_output_task_handle_);
+    }, "audio_output", 2048 * 6, this, 7, &audio_output_task_handle_, 1);
 #else
-    /* Start the audio input task */
-    xTaskCreate([](void* arg) {
+    /* Start the audio input task - pinned to core 0 */
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
+    }, "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_, 0);
 
-    /* Start the audio output task - needs large stack for Write() buffer */
-    xTaskCreate([](void* arg) {
+    /* Start the audio output task - pinned to core 1 for parallel processing
+     * Increased priority to 7 for better audio playback performance */
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 6, this, 4, &audio_output_task_handle_);
+    }, "audio_output", 2048 * 6, this, 7, &audio_output_task_handle_, 1);
 #endif
 
-    /* Start the opus codec task */
-    xTaskCreate([](void* arg) {
+    /* Start the opus codec task - pinned to core 1 with audio output
+     * Increased priority to 6 for faster decoding */
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", 2048 * 13, this, 2, &opus_codec_task_handle_);
+    }, "opus_codec", 2048 * 13, this, 6, &opus_codec_task_handle_, 1);
 }
 
 void AudioService::Stop() {

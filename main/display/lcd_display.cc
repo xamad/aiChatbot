@@ -25,6 +25,7 @@ void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
     auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
     auto large_icon_font = std::make_shared<LvglBuiltInFont>(&font_awesome_30_4);
+    auto emoji_collection = std::make_shared<Twemoji32>();
 
     // light theme
     auto light_theme = new LvglTheme("light");
@@ -40,6 +41,7 @@ void LcdDisplay::InitializeLcdThemes() {
     light_theme->set_text_font(text_font);
     light_theme->set_icon_font(icon_font);
     light_theme->set_large_icon_font(large_icon_font);
+    light_theme->set_emoji_collection(emoji_collection);
 
     // dark theme
     auto dark_theme = new LvglTheme("dark");
@@ -55,10 +57,28 @@ void LcdDisplay::InitializeLcdThemes() {
     dark_theme->set_text_font(text_font);
     dark_theme->set_icon_font(icon_font);
     dark_theme->set_large_icon_font(large_icon_font);
+    dark_theme->set_emoji_collection(emoji_collection);
+
+    // nature theme - forest/aqua colors
+    auto nature_theme = new LvglTheme("nature");
+    nature_theme->set_background_color(lv_color_hex(0x1B4D3E));    // Dark forest green
+    nature_theme->set_text_color(lv_color_hex(0xE8F5E9));          // Light mint white
+    nature_theme->set_chat_background_color(lv_color_hex(0x0D3B2E)); // Darker forest
+    nature_theme->set_user_bubble_color(lv_color_hex(0x4DB6AC));    // Teal/aqua
+    nature_theme->set_assistant_bubble_color(lv_color_hex(0x2E7D32)); // Forest green
+    nature_theme->set_system_bubble_color(lv_color_hex(0x33691E));   // Olive green
+    nature_theme->set_system_text_color(lv_color_hex(0xC8E6C9));     // Light green
+    nature_theme->set_border_color(lv_color_hex(0x81C784));          // Medium green
+    nature_theme->set_low_battery_color(lv_color_hex(0xFFAB00));     // Amber warning
+    nature_theme->set_text_font(text_font);
+    nature_theme->set_icon_font(icon_font);
+    nature_theme->set_large_icon_font(large_icon_font);
+    nature_theme->set_emoji_collection(emoji_collection);
 
     auto& theme_manager = LvglThemeManager::GetInstance();
     theme_manager.RegisterTheme("light", light_theme);
     theme_manager.RegisterTheme("dark", dark_theme);
+    theme_manager.RegisterTheme("nature", nature_theme);
 }
 
 LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height)
@@ -69,7 +89,7 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     // Initialize LCD themes
     InitializeLcdThemes();
 
-    // Load theme from settings
+    // Load theme from settings (default: dark theme for black background)
     Settings settings("display", false);
     std::string theme_name = settings.GetString("theme", "dark");
     current_theme_ = LvglThemeManager::GetInstance().GetTheme(theme_name);
@@ -396,11 +416,17 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_align(top_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
 
-    // Left icon
+    // Left icon - WiFi only
     network_label_ = lv_label_create(top_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+
+    // WebSocket status icon (between WiFi and right icons)
+    websocket_label_ = lv_label_create(top_bar_);
+    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);  // Start disconnected
+    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
+    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);  // Red when disconnected
 
     // Right icons container
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
@@ -832,11 +858,17 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
 
-    // Left icon
+    // Left icon - WiFi only
     network_label_ = lv_label_create(top_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+
+    // WebSocket status icon (between WiFi and right icons)
+    websocket_label_ = lv_label_create(top_bar_);
+    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);  // Start disconnected
+    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
+    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);  // Red when disconnected
 
     // Right icons container
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
@@ -1193,4 +1225,128 @@ void LcdDisplay::SetHideSubtitle(bool hide) {
             lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+// Animation callback for scale effect
+static void anim_scale_cb(void* var, int32_t value) {
+    lv_obj_t* obj = (lv_obj_t*)var;
+    lv_obj_set_style_transform_scale(obj, value, 0);
+}
+
+// Animation callback for opacity effect
+static void anim_opa_cb(void* var, int32_t value) {
+    lv_obj_t* obj = (lv_obj_t*)var;
+    lv_obj_set_style_opa(obj, value, 0);
+}
+
+void LcdDisplay::StartStateAnimation(const char* state) {
+    if (emoji_box_ == nullptr) {
+        return;
+    }
+
+    StopStateAnimation();  // Stop any existing animation
+
+    DisplayLockGuard lock(this);
+
+    // Set pivot point for transform
+    lv_obj_set_style_transform_pivot_x(emoji_box_, lv_pct(50), 0);
+    lv_obj_set_style_transform_pivot_y(emoji_box_, lv_pct(50), 0);
+
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, emoji_box_);
+    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&anim, 300);
+
+    if (strcmp(state, "listening") == 0) {
+        // Pulse animation for listening (scale 100% -> 115% -> 100%)
+        lv_anim_set_exec_cb(&anim, anim_scale_cb);
+        lv_anim_set_values(&anim, 256, 294);  // 256 = 100%, 294 = ~115%
+        lv_anim_set_time(&anim, 500);
+        lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+    } else if (strcmp(state, "speaking") == 0) {
+        // Bounce animation for speaking (scale 100% -> 90% -> 110% -> 100%)
+        lv_anim_set_exec_cb(&anim, anim_scale_cb);
+        lv_anim_set_values(&anim, 230, 282);  // 230 = 90%, 282 = 110%
+        lv_anim_set_time(&anim, 400);
+        lv_anim_set_path_cb(&anim, lv_anim_path_bounce);
+    } else {
+        return;
+    }
+
+    lv_anim_start(&anim);
+    animation_running_ = true;
+    ESP_LOGI(TAG, "Started %s animation", state);
+}
+
+void LcdDisplay::StopStateAnimation() {
+    if (!animation_running_ || emoji_box_ == nullptr) {
+        return;
+    }
+
+    DisplayLockGuard lock(this);
+    lv_anim_delete(emoji_box_, anim_scale_cb);
+    lv_anim_delete(emoji_box_, anim_opa_cb);
+
+    // Reset transform
+    lv_obj_set_style_transform_scale(emoji_box_, 256, 0);  // 256 = 100%
+    lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);
+
+    animation_running_ = false;
+    ESP_LOGI(TAG, "Stopped state animation");
+}
+
+void LcdDisplay::PlaySpecialAnimation(const char* animation) {
+    if (emoji_box_ == nullptr || emoji_label_ == nullptr) {
+        return;
+    }
+
+    StopStateAnimation();  // Stop any existing animation
+
+    DisplayLockGuard lock(this);
+
+    // Set special emoji based on animation type
+    const char* emoji = nullptr;
+    if (strcmp(animation, "heart") == 0 || strcmp(animation, "love") == 0) {
+        emoji = FONT_AWESOME_HEART;
+    } else if (strcmp(animation, "star") == 0) {
+        emoji = FONT_AWESOME_STAR;
+    } else if (strcmp(animation, "happy") == 0) {
+        emoji = FONT_AWESOME_HAPPY;
+    } else if (strcmp(animation, "wink") == 0) {
+        emoji = FONT_AWESOME_WINKING;
+    } else {
+        ESP_LOGW(TAG, "Unknown special animation: %s", animation);
+        return;
+    }
+
+    // Show the special emoji (hide image, show label)
+    lv_label_set_text(emoji_label_, emoji);
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+
+    // Set heart color to red for heart animation
+    if (strcmp(animation, "heart") == 0 || strcmp(animation, "love") == 0) {
+        lv_obj_set_style_text_color(emoji_label_, lv_color_hex(0xFF1744), 0);  // Red
+    } else if (strcmp(animation, "star") == 0) {
+        lv_obj_set_style_text_color(emoji_label_, lv_color_hex(0xFFD700), 0);  // Gold
+    }
+
+    // Set pivot point for transform
+    lv_obj_set_style_transform_pivot_x(emoji_box_, lv_pct(50), 0);
+    lv_obj_set_style_transform_pivot_y(emoji_box_, lv_pct(50), 0);
+
+    // Create heartbeat animation (scale up then down)
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, emoji_box_);
+    lv_anim_set_exec_cb(&anim, anim_scale_cb);
+    lv_anim_set_values(&anim, 200, 350);  // 200 = ~78%, 350 = ~137% (big heartbeat)
+    lv_anim_set_time(&anim, 300);
+    lv_anim_set_playback_time(&anim, 300);
+    lv_anim_set_repeat_count(&anim, 3);  // 3 heartbeats
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&anim);
+
+    ESP_LOGI(TAG, "Playing special animation: %s", animation);
 }

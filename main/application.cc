@@ -488,7 +488,10 @@ void Application::InitializeProtocol() {
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
-        protocol_ = std::make_unique<WebsocketProtocol>();
+        auto ws_protocol = std::make_unique<WebsocketProtocol>();
+        // Enable WebSocket keep-alive for faster wake word response
+        ws_protocol->EnableKeepAlive(true);
+        protocol_ = std::move(ws_protocol);
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
         protocol_ = std::make_unique<MqttProtocol>();
@@ -511,14 +514,20 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        // Update WebSocket status icon
+        auto display = board.GetDisplay();
+        display->SetWebSocketConnected(true);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
     });
-    
+
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        // Update WebSocket status icon (only if keep-alive is disabled)
+        auto display = board.GetDisplay();
+        display->SetWebSocketConnected(false);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -539,11 +548,12 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
+                        // Always go to LISTENING for multi-turn conversation
+                        // ManualStop only applies when user explicitly stops
+                        SetDeviceState(kDeviceStateListening);
+                        // Force re-enable voice processing for multi-turn
+                        audio_service_.EnableVoiceProcessing(true);
+                        ESP_LOGI(TAG, "TTS finished, ready for next turn");
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -596,6 +606,18 @@ void Application::InitializeProtocol() {
                 Alert(status->valuestring, message->valuestring, emotion->valuestring, Lang::Sounds::OGG_VIBRATION);
             } else {
                 ESP_LOGW(TAG, "Alert command requires status, message and emotion");
+            }
+        } else if (strcmp(type->valuestring, "special_animation") == 0) {
+            // Handle special animations triggered by server (e.g., "GIANNINO" → heart)
+            // Server sends: {"type": "special_animation", "animation": "heart"}
+            auto animation = cJSON_GetObjectItem(root, "animation");
+            if (cJSON_IsString(animation)) {
+                ESP_LOGI(TAG, "Playing special animation: %s", animation->valuestring);
+                Schedule([this, display, anim_str = std::string(animation->valuestring)]() {
+                    display->PlaySpecialAnimation(anim_str.c_str());
+                });
+            } else {
+                ESP_LOGW(TAG, "special_animation requires 'animation' field");
             }
 #if CONFIG_RECEIVE_CUSTOM_MESSAGE
         } else if (strcmp(type->valuestring, "custom") == 0) {
@@ -893,6 +915,25 @@ void Application::HandleWakeWordDetectedEvent() {
     } else if (state == kDeviceStateActivating) {
         // Restart the activation check if the wake word is detected during activation
         SetDeviceState(kDeviceStateIdle);
+    } else if (state == kDeviceStateConnecting) {
+        // Abort connection attempt and go back to idle
+        ESP_LOGI(TAG, "Wake word detected during connecting, aborting connection");
+        protocol_->CloseAudioChannel();
+        SetDeviceState(kDeviceStateIdle);
+        // Re-trigger wake word to start fresh
+        audio_service_.EnableWakeWordDetection(true);
+    } else if (state == kDeviceStateListening) {
+        // Already listening - abort current session and restart
+        ESP_LOGI(TAG, "Wake word detected during listening, restarting session");
+        protocol_->CloseAudioChannel();
+        SetDeviceState(kDeviceStateIdle);
+        // Re-enable wake word detection to process this detection
+        audio_service_.EnableWakeWordDetection(true);
+    } else if (state == kDeviceStateWifiConfiguring || state == kDeviceStateAudioTesting) {
+        // Exit configuration/test mode and go to idle
+        ESP_LOGI(TAG, "Wake word detected during config/test, exiting to idle");
+        audio_service_.EnableAudioTesting(false);
+        SetDeviceState(kDeviceStateIdle);
     }
 }
 
@@ -906,10 +947,21 @@ void Application::HandleStateChangedEvent() {
     led->OnStateChanged();
     
     switch (new_state) {
+        case kDeviceStateStarting:
+            display->SetStatus(Lang::Strings::INITIALIZING);
+            display->SetEmotion("thinking");  // Animated thinking emoji during boot
+            display->StartStateAnimation("speaking");  // Add pulse animation
+            break;
+        case kDeviceStateActivating:
+            display->SetStatus(Lang::Strings::ACTIVATION);
+            display->SetEmotion("neutral");
+            display->StartStateAnimation("listening");  // Pulse while activating
+            break;
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("neutral");
+            display->StopStateAnimation();
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
@@ -917,13 +969,14 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
-            // Disable wake word detection during WebSocket connection to prevent
-            // AFE ring buffer overflow (fetch is blocked but AudioInputTask keeps feeding)
-            audio_service_.EnableWakeWordDetection(false);
+            // Keep wake word detection ENABLED during connecting so user can interrupt
+            // if connection is stuck (e.g., server not responding)
+            audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            display->StartStateAnimation("listening");
 
             // Always restart voice processing when entering listening state
             // This ensures proper state after transitions from speaking/connecting
@@ -946,6 +999,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            display->StartStateAnimation("speaking");
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);

@@ -54,3 +54,19 @@ void Display::SetTheme(Theme* theme) {
 void Display::SetPowerSaveMode(bool on) {
     ESP_LOGW(TAG, "SetPowerSaveMode: %d", on);
 }
+
+void Display::SetWebSocketConnected(bool connected) {
+    ESP_LOGI(TAG, "WebSocket %s", connected ? "connected" : "disconnected");
+}
+
+void Display::StartStateAnimation(const char* state) {
+    ESP_LOGI(TAG, "StartStateAnimation: %s", state);
+}
+
+void Display::StopStateAnimation() {
+    ESP_LOGI(TAG, "StopStateAnimation");
+}
+
+void Display::PlaySpecialAnimation(const char* animation) {
+    ESP_LOGI(TAG, "PlaySpecialAnimation: %s", animation);
+}

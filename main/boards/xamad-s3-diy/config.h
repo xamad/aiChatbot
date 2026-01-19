@@ -6,7 +6,7 @@
 /*
  * XAMAD ESP32-S3 DIY Board
  * ========================
- * - TFT 1.8" ST7735 128x160 (8 pin SPI)
+ * - OLED 0.96" SSD1306 128x64 (4 pin I2C)
  * - INMP441 I2S Microphone (6 pin)
  * - MAX98357A I2S Amplifier (7 pin)
  *
@@ -39,26 +39,15 @@
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_NC
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
-// TFT 1.8" ST7735 Display SPI Pins
-#define DISPLAY_BACKLIGHT_PIN   GPIO_NUM_13   // Backlight (LED/BL)
-#define DISPLAY_MOSI_PIN        GPIO_NUM_11   // SPI MOSI (SDA)
-#define DISPLAY_CLK_PIN         GPIO_NUM_12   // SPI Clock (SCK)
-#define DISPLAY_DC_PIN          GPIO_NUM_8    // Data/Command (DC/A0)
-#define DISPLAY_RST_PIN         GPIO_NUM_9    // Reset (RESET)
-#define DISPLAY_CS_PIN          GPIO_NUM_10   // Chip Select (CS)
+// OLED 0.96" SSD1306 Display I2C Pins
+#define DISPLAY_I2C_SDA_PIN     GPIO_NUM_11   // I2C Data (SDA)
+#define DISPLAY_I2C_SCL_PIN     GPIO_NUM_12   // I2C Clock (SCL)
+#define DISPLAY_I2C_ADDR        0x3C          // SSD1306 I2C address
 
-// ST7735 128x160 Display Configuration
-#define LCD_TYPE_ST7789_SERIAL
+// SSD1306 128x64 OLED Display Configuration
 #define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  160
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    false
-#define DISPLAY_RGB_ORDER       LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
+#define DISPLAY_HEIGHT  64
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y true   // Flip to put yellow strip at top
 
 #endif // _BOARD_CONFIG_H_

@@ -48,14 +48,23 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
-    virtual void SetChatMessage(const char* role, const char* content) override; 
+    virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
 
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
-    
+
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);
+
+    // Animation support
+    virtual void StartStateAnimation(const char* state) override;
+    virtual void StopStateAnimation() override;
+    virtual void PlaySpecialAnimation(const char* animation) override;
+
+private:
+    lv_anim_t* state_anim_ = nullptr;
+    bool animation_running_ = false;
 };
 
 // SPI LCD display

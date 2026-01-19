@@ -1,6 +1,6 @@
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
-#include "display/lcd_display.h"
+#include "display/oled_display.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -11,7 +11,7 @@
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include <driver/spi_common.h>
+#include <driver/i2c_master.h>
 #include <driver/gpio.h>
 
 #define TAG "XamadS3DiyBoard"
@@ -20,12 +20,12 @@
  * XAMAD ESP32-S3 DIY Board
  * ========================
  * Custom board with:
- * - TFT 1.8" ST7735 128x160 display
+ * - OLED 0.96" SSD1306 128x64 display (I2C)
  * - INMP441 I2S microphone
  * - MAX98357A I2S amplifier
  *
  * Pinout:
- * - Display: CS=10, DC=8, RST=9, MOSI=11, SCK=12, BL=13
+ * - Display: SDA=11, SCL=12
  * - Mic:     WS=15, SCK=16, DATA=14
  * - Speaker: BCLK=5, LRC=6, DATA=18, SD=17
  * - Boot:    GPIO0
@@ -34,7 +34,10 @@
 class XamadS3DiyBoard : public WifiBoard {
 private:
     Button boot_button_;
-    LcdDisplay* display_;
+    i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
+    esp_lcd_panel_io_handle_t panel_io_ = nullptr;
+    esp_lcd_panel_handle_t panel_ = nullptr;
+    Display* display_ = nullptr;
 
     void InitializeAmplifier() {
         ESP_LOGI(TAG, "Initializing MAX98357A amplifier on GPIO %d...", AUDIO_CODEC_PA_PIN);
@@ -59,78 +62,71 @@ private:
         // Small delay for amplifier to stabilize
         vTaskDelay(pdMS_TO_TICKS(100));
         ESP_LOGI(TAG, "Amplifier enabled and ready");
-
-        // Generate test tone to verify speaker works
-        ESP_LOGI(TAG, "Playing test tone...");
     }
 
-    void InitializeBacklightGpio() {
-        // Force backlight ON via direct GPIO control
-        gpio_config_t bl_conf = {};
-        bl_conf.pin_bit_mask = BIT64(DISPLAY_BACKLIGHT_PIN);
-        bl_conf.mode = GPIO_MODE_OUTPUT;
-        bl_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        bl_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        bl_conf.intr_type = GPIO_INTR_DISABLE;
-        gpio_config(&bl_conf);
-        // Set backlight HIGH (most displays are active-high)
-        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 1);
-        ESP_LOGI(TAG, "Backlight GPIO %d set HIGH", DISPLAY_BACKLIGHT_PIN);
+    void InitializeDisplayI2c() {
+        ESP_LOGI(TAG, "Initializing I2C bus for OLED display");
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = I2C_NUM_0,
+            .sda_io_num = DISPLAY_I2C_SDA_PIN,
+            .scl_io_num = DISPLAY_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &display_i2c_bus_));
+        ESP_LOGI(TAG, "I2C bus initialized: SDA=%d, SCL=%d", DISPLAY_I2C_SDA_PIN, DISPLAY_I2C_SCL_PIN);
     }
 
-    void InitializeSpi() {
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = DISPLAY_MOSI_PIN;
-        buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = DISPLAY_CLK_PIN;
-        buscfg.quadwp_io_num = GPIO_NUM_NC;
-        buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
-        ESP_LOGI(TAG, "SPI bus initialized for display");
-    }
+    void InitializeOledDisplay() {
+        ESP_LOGI(TAG, "Initializing SSD1306 128x64 OLED display");
 
-    void InitializeLcdDisplay() {
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        esp_lcd_panel_handle_t panel = nullptr;
+        esp_lcd_panel_io_i2c_config_t io_config = {
+            .dev_addr = DISPLAY_I2C_ADDR,
+            .on_color_trans_done = nullptr,
+            .user_ctx = nullptr,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 6,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+            .flags = {
+                .dc_low_on_data = 0,
+                .disable_control_phase = 0,
+            },
+            .scl_speed_hz = 400 * 1000,
+        };
 
-        ESP_LOGI(TAG, "Initializing ST7735 128x160 display");
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(display_i2c_bus_, &io_config, &panel_io_));
 
-        // LCD panel IO configuration
-        esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = DISPLAY_CS_PIN;
-        io_config.dc_gpio_num = DISPLAY_DC_PIN;
-        io_config.spi_mode = DISPLAY_SPI_MODE;
-        io_config.pclk_hz = 40 * 1000 * 1000;
-        io_config.trans_queue_depth = 10;
-        io_config.lcd_cmd_bits = 8;
-        io_config.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
-
-        // LCD panel configuration
+        ESP_LOGI(TAG, "Installing SSD1306 driver");
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = DISPLAY_RST_PIN;
-        panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
-        panel_config.bits_per_pixel = 16;
+        panel_config.reset_gpio_num = -1;
+        panel_config.bits_per_pixel = 1;
 
-        // Use ST7789 driver (compatible with ST7735)
-        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
+        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+            .height = static_cast<uint8_t>(DISPLAY_HEIGHT),
+        };
+        panel_config.vendor_config = &ssd1306_config;
 
-        esp_lcd_panel_reset(panel);
-        esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+        ESP_LOGI(TAG, "SSD1306 driver installed");
 
-        // Turn on display
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        if (esp_lcd_panel_init(panel_) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize display");
+            display_ = new NoDisplay();
+            return;
+        }
 
-        display_ = new SpiLcdDisplay(panel_io, panel,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                    DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "Turning display on");
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        ESP_LOGI(TAG, "Display initialized: %dx%d", DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        ESP_LOGI(TAG, "OLED Display initialized: %dx%d", DISPLAY_WIDTH, DISPLAY_HEIGHT);
     }
 
     void InitializeButtons() {
@@ -147,11 +143,9 @@ private:
 
 public:
     XamadS3DiyBoard() : boot_button_(BOOT_BUTTON_GPIO) {
-        ESP_LOGI(TAG, "Initializing XAMAD ESP32-S3 DIY Board");
-        InitializeBacklightGpio();
-        // Don't init amplifier here - do it after audio codec is ready
-        InitializeSpi();
-        InitializeLcdDisplay();
+        ESP_LOGI(TAG, "Initializing XAMAD ESP32-S3 DIY Board (OLED version)");
+        InitializeDisplayI2c();
+        InitializeOledDisplay();
         InitializeButtons();
         ESP_LOGI(TAG, "Board initialization complete!");
     }
@@ -209,11 +203,6 @@ public:
 
     virtual Display* GetDisplay() override {
         return display_;
-    }
-
-    virtual Backlight* GetBacklight() override {
-        // Using direct GPIO control for backlight, not PWM
-        return nullptr;
     }
 };
 

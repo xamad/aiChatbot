@@ -215,6 +215,24 @@ void LvglDisplay::SetPowerSaveMode(bool on) {
     }
 }
 
+void LvglDisplay::SetWebSocketConnected(bool connected) {
+    websocket_connected_ = connected;
+    if (websocket_label_ == nullptr) {
+        return;
+    }
+
+    DisplayLockGuard lock(this);
+    const char* new_icon = connected ? FONT_AWESOME_LINK : FONT_AWESOME_CLOUD_SLASH;
+    if (websocket_icon_ != new_icon) {
+        websocket_icon_ = new_icon;
+        lv_label_set_text(websocket_label_, websocket_icon_);
+        // Green when connected, red when disconnected
+        lv_obj_set_style_text_color(websocket_label_,
+            connected ? lv_color_hex(0x4CAF50) : lv_color_hex(0xF44336), 0);
+    }
+    ESP_LOGI(TAG, "WebSocket status icon updated: %s", connected ? "connected" : "disconnected");
+}
+
 bool LvglDisplay::SnapshotToJpeg(std::string& jpeg_data, int quality) {
 #if CONFIG_LV_USE_SNAPSHOT
     DisplayLockGuard lock(this);
