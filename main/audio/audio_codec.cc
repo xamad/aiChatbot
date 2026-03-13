@@ -45,7 +45,9 @@ void AudioCodec::Start() {
     if (tx_handle_ != nullptr) {
         ESP_LOGI(TAG, "Enabling TX I2S channel...");
         esp_err_t ret = i2s_channel_enable(tx_handle_);
-        if (ret != ESP_OK) {
+        if (ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGI(TAG, "TX channel already enabled (OK)");
+        } else if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to enable TX channel: %s", esp_err_to_name(ret));
         } else {
             ESP_LOGI(TAG, "TX channel enabled OK");
@@ -57,7 +59,9 @@ void AudioCodec::Start() {
     if (rx_handle_ != nullptr) {
         ESP_LOGI(TAG, "Enabling RX I2S channel...");
         esp_err_t ret = i2s_channel_enable(rx_handle_);
-        if (ret != ESP_OK) {
+        if (ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGI(TAG, "RX channel already enabled (OK)");
+        } else if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to enable RX channel: %s", esp_err_to_name(ret));
         } else {
             ESP_LOGI(TAG, "RX channel enabled OK");

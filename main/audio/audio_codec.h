@@ -51,7 +51,7 @@ protected:
     int output_sample_rate_ = 0;
     int input_channels_ = 1;
     int output_channels_ = 1;
-    int output_volume_ = 50;  // Reduced from 90 to avoid distortion with MAX98357A at 15dB gain
+    int output_volume_ = 30;  // Reduced further to minimize crackling with MAX98357A
     float input_gain_ = 0.0;
 
     virtual int Read(int16_t* dest, int samples) = 0;

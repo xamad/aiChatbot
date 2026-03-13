@@ -150,6 +150,7 @@ bool Assets::Apply() {
     auto& theme_manager = LvglThemeManager::GetInstance();
     auto light_theme = theme_manager.GetTheme("light");
     auto dark_theme = theme_manager.GetTheme("dark");
+    auto nature_theme = theme_manager.GetTheme("nature");
 
     cJSON* font = cJSON_GetObjectItem(root, "text_font");
     if (cJSON_IsString(font)) {
@@ -165,6 +166,9 @@ bool Assets::Apply() {
             }
             if (dark_theme != nullptr) {
                 dark_theme->set_text_font(text_font);
+            }
+            if (nature_theme != nullptr) {
+                nature_theme->set_text_font(text_font);
             }
         } else {
             ESP_LOGE(TAG, "The font file %s is not found", fonts_text_file.c_str());
@@ -195,6 +199,9 @@ bool Assets::Apply() {
         }
         if (dark_theme != nullptr) {
             dark_theme->set_emoji_collection(custom_emoji_collection);
+        }
+        if (nature_theme != nullptr) {
+            nature_theme->set_emoji_collection(custom_emoji_collection);
         }
     }
 

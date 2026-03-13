@@ -4,6 +4,7 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
             "audio/codecs/es8311_audio_codec.cc"
+            "audio/codecs/simple_es8311_audio_codec.cc"
             "audio/codecs/es8374_audio_codec.cc"
             "audio/codecs/es8388_audio_codec.cc"
             "audio/codecs/es8389_audio_codec.cc"
@@ -347,6 +348,16 @@ elseif(CONFIG_BOARD_TYPE_XAMAD_S3_DIY)
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
     set(DEFAULT_EMOJI_COLLECTION twemoji_32)
+elseif(CONFIG_BOARD_TYPE_ESP32S3_28TOUCH)
+    set(BOARD_TYPE "esp32s3-28touch")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_SKYGUARD_ELITE)
+    set(BOARD_TYPE "skyguard-elite")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)
 elseif(CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1)
     set(BOARD_TYPE "lilygo-t-cameraplus-s3")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
@@ -583,7 +594,13 @@ file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
 )
-list(APPEND SOURCES ${BOARD_SOURCES})
+file(GLOB BOARD_SENSOR_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/sensors/*.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/sensors/*.c
+)
+list(APPEND SOURCES ${BOARD_SOURCES} ${BOARD_SENSOR_SOURCES})
+list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/sensors)
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)

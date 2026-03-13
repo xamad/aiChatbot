@@ -1,6 +1,8 @@
 #include "es8311_audio_codec.h"
 
 #include <esp_log.h>
+#include <cstring>
+#include <vector>
 
 #define TAG "Es8311AudioCodec"
 
@@ -18,6 +20,14 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
 
     assert(input_sample_rate_ == output_sample_rate_);
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
+
+    // NOTE: Do NOT pre-enable I2S channels here!
+    // esp_codec_dev_open() will enable them in the correct order:
+    // 1. Configure ES8311 registers via I2C
+    // 2. Set I2S clock/slot format
+    // 3. Enable I2S channels (starts MCLK)
+    // Pre-enabling causes a race condition where DMA starts clocking
+    // before ES8311 ADC is configured, resulting in silence.
 
     // Do initialize of related interface: data_if, ctrl_if and gpio_if
     audio_codec_i2s_cfg_t i2s_cfg = {
@@ -79,7 +89,7 @@ void Es8311AudioCodec::UpdateDeviceState() {
 
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
-            .channel = 1,
+            .channel = 2,  // Must match I2S stereo mode; mono extraction done in Read()
             .channel_mask = 0,
             .sample_rate = (uint32_t)input_sample_rate_,
             .mclk_multiple = 0,
@@ -154,7 +164,9 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
 }
 
 void Es8311AudioCodec::SetOutputVolume(int volume) {
-    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
+    if (dev_ != nullptr) {
+        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
+    }
     AudioCodec::SetOutputVolume(volume);
 }
 
@@ -183,15 +195,49 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
 }
 
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {
-    if (input_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
+    static int read_count = 0;
+    if (input_enabled_ && dev_ != nullptr) {
+        // Read stereo data from I2S (ES8311 is mono but bus is stereo)
+        std::vector<int16_t> stereo_buf(samples * 2);
+        esp_err_t ret = esp_codec_dev_read(dev_, (void*)stereo_buf.data(),
+                                            samples * 2 * sizeof(int16_t));
+        if (ret == ESP_OK) {
+            // Extract left channel (ES8311 mono ADC on left)
+            int16_t max_l = 0, max_r = 0;
+            for (int i = 0; i < samples; i++) {
+                dest[i] = stereo_buf[i * 2];
+                int16_t l = stereo_buf[i * 2];
+                int16_t r = stereo_buf[i * 2 + 1];
+                if (l > max_l || -l > max_l) max_l = (l > 0) ? l : -l;
+                if (r > max_r || -r > max_r) max_r = (r > 0) ? r : -r;
+            }
+            // Log every 200 reads (~3 seconds)
+            if (++read_count >= 200) {
+                ESP_LOGI(TAG, "Mic read: L_max=%d R_max=%d samples=%d", max_l, max_r, samples);
+                read_count = 0;
+            }
+        } else {
+            ESP_LOGE(TAG, "esp_codec_dev_read FAILED: %s", esp_err_to_name(ret));
+            memset(dest, 0, samples * sizeof(int16_t));
+        }
+    } else {
+        memset(dest, 0, samples * sizeof(int16_t));
     }
+    vTaskDelay(1);  // Throttle to prevent AFE buffer overflow
     return samples;
 }
 
 int Es8311AudioCodec::Write(const int16_t* data, int samples) {
-    if (output_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t)));
+    if (output_enabled_ && dev_ != nullptr) {
+        // Input is mono, but codec is opened with channel=2 (stereo I2S).
+        // Must duplicate mono → stereo, otherwise plays at 2x speed.
+        std::vector<int16_t> stereo_buf(samples * 2);
+        for (int i = 0; i < samples; i++) {
+            stereo_buf[i * 2]     = data[i];  // LEFT
+            stereo_buf[i * 2 + 1] = data[i];  // RIGHT (duplicate)
+        }
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)stereo_buf.data(),
+            samples * 2 * sizeof(int16_t)));
     }
     return samples;
 }

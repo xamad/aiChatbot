@@ -318,6 +318,12 @@ choice BOARD_TYPE
     config BOARD_TYPE_XAMAD_S3_DIY
         bool "XAMAD ESP32-S3 DIY (TFT 1.8 + INMP441 + MAX98357A)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_ESP32S3_28TOUCH
+        bool "ESP32-S3 2.8\" Touch Display (ILI9341 + FT6336G)"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_SKYGUARD_ELITE
+        bool "SkyGuard Elite — AI Astronomy Copilot (2.8\" Touch + SQM + GPS)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
         bool "LILYGO T-CameraPlus-S3_V1_0_V1_1"
         depends on IDF_TARGET_ESP32S3

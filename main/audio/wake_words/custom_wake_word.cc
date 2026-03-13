@@ -89,7 +89,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     commands_.clear();
 
     if (models_list == nullptr) {
-        language_ = "cn";
+        language_ = "en";  // Changed from "cn" - we use English MultiNet model
         models_ = esp_srmodel_init("model");
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
@@ -143,8 +143,21 @@ void CustomWakeWord::Stop() {
 }
 
 void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
+    static int feed_count = 0;
+
     if (multinet_model_data_ == nullptr || !running_) {
         return;
+    }
+
+    // Log audio levels periodically to verify mic data is reaching wake word
+    if (++feed_count % 100 == 0) {
+        int16_t min_val = 32767, max_val = -32768;
+        for (size_t i = 0; i < data.size() && i < 100; i++) {
+            if (data[i] < min_val) min_val = data[i];
+            if (data[i] > max_val) max_val = data[i];
+        }
+        ESP_LOGI(TAG, "WakeWord Feed #%d: %d samples, range=[%d,%d]",
+                 feed_count, (int)data.size(), min_val, max_val);
     }
 
     esp_mn_state_t mn_state;

@@ -1178,6 +1178,21 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
+void Application::SendChatMessage(const std::string& text) {
+    Schedule([this, text]() {
+        if (!protocol_) return;
+        // Open audio channel if needed
+        if (!protocol_->IsAudioChannelOpened()) {
+            if (!protocol_->OpenAudioChannel()) {
+                ESP_LOGW(TAG, "SendChatMessage: failed to open audio channel");
+                return;
+            }
+        }
+        // Send as if user spoke the text — server will process via LLM → TTS
+        protocol_->SendWakeWordDetected(text);
+    });
+}
+
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {

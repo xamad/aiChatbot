@@ -92,7 +92,13 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     // Load theme from settings (default: dark theme for black background)
     Settings settings("display", false);
     std::string theme_name = settings.GetString("theme", "dark");
+    ESP_LOGW(TAG, "Theme from NVS: '%s'", theme_name.c_str());
     current_theme_ = LvglThemeManager::GetInstance().GetTheme(theme_name);
+    if (!current_theme_) {
+        ESP_LOGE(TAG, "Theme '%s' not found! Falling back to 'dark'", theme_name.c_str());
+        current_theme_ = LvglThemeManager::GetInstance().GetTheme("dark");
+    }
+    ESP_LOGW(TAG, "Active theme: %s (ptr=%p)", current_theme_ ? current_theme_->name().c_str() : "NULL", current_theme_);
 
     // Create a timer to hide the preview image
     esp_timer_create_args_t preview_timer_args = {
@@ -422,13 +428,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
 
-    // WebSocket status icon (between WiFi and right icons)
-    websocket_label_ = lv_label_create(top_bar_);
-    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);  // Start disconnected
-    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
-    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);  // Red when disconnected
-
-    // Right icons container
+    // Right icons container (WS + Mute + Battery — all right-aligned)
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
     lv_obj_set_size(right_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
@@ -436,6 +436,13 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_all(right_icons, 0, 0);
     lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // WebSocket status icon (right-aligned, before mute/battery)
+    websocket_label_ = lv_label_create(right_icons);
+    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);
+    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
+    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);
+    lv_obj_set_style_margin_right(websocket_label_, lvgl_theme->spacing(2), 0);
 
     mute_label_ = lv_label_create(right_icons);
     lv_label_set_text(mute_label_, "");
@@ -587,7 +594,8 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     // Create the message text
     lv_obj_t* msg_text = lv_label_create(msg_bubble);
     lv_label_set_text(msg_text, content);
-    
+    lv_obj_set_style_text_font(msg_text, text_font, 0);
+
     // Calculate actual text width
     lv_coord_t text_width = lv_txt_get_width(content, strlen(content), text_font, 0);
 
@@ -864,13 +872,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
 
-    // WebSocket status icon (between WiFi and right icons)
-    websocket_label_ = lv_label_create(top_bar_);
-    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);  // Start disconnected
-    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
-    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);  // Red when disconnected
-
-    // Right icons container
+    // Right icons container (WS + Mute + Battery — all right-aligned)
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
     lv_obj_set_size(right_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
@@ -878,6 +880,13 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_all(right_icons, 0, 0);
     lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // WebSocket status icon (right-aligned, before mute/battery)
+    websocket_label_ = lv_label_create(right_icons);
+    lv_label_set_text(websocket_label_, FONT_AWESOME_CLOUD_SLASH);
+    lv_obj_set_style_text_font(websocket_label_, icon_font, 0);
+    lv_obj_set_style_text_color(websocket_label_, lv_color_hex(0xF44336), 0);
+    lv_obj_set_style_margin_right(websocket_label_, lvgl_theme->spacing(2), 0);
 
     mute_label_ = lv_label_create(right_icons);
     lv_label_set_text(mute_label_, "");
@@ -916,6 +925,9 @@ void LcdDisplay::SetupUI() {
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
+    if (LV_HOR_RES <= 320) {
+        lv_obj_set_style_text_font(status_label_, &lv_font_montserrat_10, 0);
+    }
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
 
@@ -941,6 +953,10 @@ void LcdDisplay::SetupUI() {
     lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP); // Auto wrap mode
     lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // Center text alignment
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
+    // Use smaller font for chat text on small displays (320x240)
+    if (LV_HOR_RES <= 320) {
+        lv_obj_set_style_text_font(chat_message_label_, &lv_font_montserrat_10, 0);
+    }
     lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0); // Vertically and horizontally centered in bottom_bar_
 
     low_battery_popup_ = lv_obj_create(screen);
