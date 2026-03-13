@@ -3108,34 +3108,70 @@ void SkyGuardDisplay::UpdatePageWeather() {
         }
     }
 
-    // Astronomy verdict — average conditions over first 3 hourly entries
+    // Astronomy verdict — based on ALL hourly entries
+    // For astronomy: clouds are the #1 killer, rain is instant-fail,
+    // wind matters for scopes, humidity for dew
     if (weather_verdict_ && forecast.count > 0) {
-        int n = (forecast.count < 3) ? forecast.count : 3;
-        float avg_clouds = 0, avg_wind = 0, avg_hum = 0;
+        int n = forecast.count < 5 ? forecast.count : 5;
+        float avg_clouds = 0, max_clouds = 0, avg_wind = 0, avg_hum = 0;
+        float total_rain = 0, total_snow = 0;
         for (int i = 0; i < n; i++) {
             avg_clouds += forecast.entries[i].clouds;
+            if (forecast.entries[i].clouds > max_clouds)
+                max_clouds = forecast.entries[i].clouds;
             avg_wind += forecast.entries[i].wind_speed;
             avg_hum += forecast.entries[i].humidity;
+            total_rain += forecast.entries[i].rain_3h;
+            total_snow += forecast.entries[i].snow_3h;
         }
         avg_clouds /= n; avg_wind /= n; avg_hum /= n;
 
-        float score = 100.0f;
-        score -= avg_clouds * 0.6f;
-        score -= (avg_wind > 5 ? (avg_wind - 5) * 4 : 0);
-        score -= (avg_hum > 60 ? (avg_hum - 60) * 0.5f : 0);
-        if (score < 0) score = 0;
-
         const char* verdict;
         lv_color_t vcolor;
-        if (score >= 70) {
-            verdict = "* Ottimo per osservare *";
-            vcolor = SG_GOOD_COLOR;
-        } else if (score >= 45) {
-            verdict = "Condizioni discrete";
-            vcolor = SG_WARN_COLOR;
-        } else {
-            verdict = "Scarso per astronomia";
+
+        // Instant-fail conditions
+        if (total_rain > 0.5f || total_snow > 0.1f) {
+            verdict = "Pioggia/neve prevista";
             vcolor = SG_BAD_COLOR;
+        } else if (avg_clouds > 80) {
+            verdict = "Cielo coperto";
+            vcolor = SG_BAD_COLOR;
+        } else if (avg_clouds > 50) {
+            // Mostly cloudy — not viable for deep sky, maybe planets
+            if (avg_wind > 8) {
+                verdict = "Nubi + vento forte";
+                vcolor = SG_BAD_COLOR;
+            } else {
+                verdict = "Troppo nuvoloso";
+                vcolor = SG_BAD_COLOR;
+            }
+        } else if (avg_clouds > 30) {
+            // Partly cloudy — marginal
+            if (avg_wind > 10) {
+                verdict = "Vento forte";
+                vcolor = SG_BAD_COLOR;
+            } else if (avg_hum > 85) {
+                verdict = "Umidita alta, rischio condensa";
+                vcolor = SG_WARN_COLOR;
+            } else {
+                verdict = "Parzialmente nuvoloso";
+                vcolor = SG_WARN_COLOR;
+            }
+        } else {
+            // Clear skies (<30% clouds)
+            if (avg_wind > 10) {
+                verdict = "Sereno ma vento forte";
+                vcolor = SG_WARN_COLOR;
+            } else if (avg_hum > 85) {
+                verdict = "Sereno, attenzione condensa";
+                vcolor = SG_WARN_COLOR;
+            } else if (avg_clouds < 15 && avg_wind < 5) {
+                verdict = "* Condizioni eccellenti *";
+                vcolor = SG_GOOD_COLOR;
+            } else {
+                verdict = "Buono per osservare";
+                vcolor = SG_GOOD_COLOR;
+            }
         }
         lv_label_set_text(weather_verdict_, verdict);
         lv_obj_set_style_text_color(weather_verdict_, vcolor, 0);

@@ -1581,13 +1581,22 @@ private:
                 cJSON_AddItemToArray(wd, e);
             }
             cJSON_AddItemToObject(root, "weather_daily", wd);
-            // Verdict
-            int clear_hours = 0;
-            for (int i = 0; i < fc.count && i < 5; i++) {
-                if (fc.entries[i].clouds < 30) clear_hours++;
+            // Verdict — same logic as display
+            int n = fc.count < 5 ? fc.count : 5;
+            float avg_clouds = 0, avg_wind = 0, avg_hum = 0, total_rain = 0;
+            for (int i = 0; i < n; i++) {
+                avg_clouds += fc.entries[i].clouds;
+                avg_wind += fc.entries[i].wind_speed;
+                avg_hum += fc.entries[i].humidity;
+                total_rain += fc.entries[i].rain_3h + fc.entries[i].snow_3h;
             }
-            const char* verdict = clear_hours >= 4 ? "CIELO FAVOREVOLE" :
-                                  clear_hours >= 2 ? "PARZIALE" : "NON FAVOREVOLE";
+            if (n > 0) { avg_clouds /= n; avg_wind /= n; avg_hum /= n; }
+            const char* verdict;
+            if (total_rain > 0.5f) verdict = "PIOGGIA PREVISTA";
+            else if (avg_clouds > 50) verdict = "NON FAVOREVOLE";
+            else if (avg_clouds > 30) verdict = "PARZIALE";
+            else if (avg_wind > 10) verdict = "VENTO FORTE";
+            else verdict = "CIELO FAVOREVOLE";
             cJSON_AddStringToObject(root, "wx_verdict", verdict);
         }
 
