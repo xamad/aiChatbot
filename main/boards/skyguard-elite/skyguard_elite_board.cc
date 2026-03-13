@@ -455,8 +455,19 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
-            ESP_LOGI(TAG, "Toggling chat state...");
-            app.ToggleChatState();
+            // If AI is active (listening/speaking/connecting), ALWAYS exit
+            // If AI is idle, toggle to start chatbot
+            if (state == kDeviceStateListening ||
+                state == kDeviceStateSpeaking ||
+                state == kDeviceStateConnecting) {
+                ESP_LOGI(TAG, "BOOT press → exiting chatbot (was active)");
+                app.ToggleChatState();
+                ai_idle_counter_ = 0;
+                ai_was_active_ = false;
+            } else {
+                ESP_LOGI(TAG, "BOOT press → starting chatbot");
+                app.ToggleChatState();
+            }
         });
     }
 
@@ -2617,23 +2628,36 @@ private:
                     board->sg_display_->Setup();
                     board->sg_display_->ShowBootLoader();
 
-                    // Swipe-down on screen during AI conversation → exit chatbot
+                    // Touch screen during AI conversation → exit chatbot
+                    // Both swipe-down and single tap work as exit
                     if (lvgl_port_lock(50)) {
                         lv_obj_t* scr = lv_screen_active();
                         if (scr) {
                             lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
+                            // Swipe-down exit
                             lv_obj_add_event_cb(scr, [](lv_event_t* e) {
                                 lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
-                                if (dir != LV_DIR_BOTTOM) return;  // Only swipe-down
+                                if (dir != LV_DIR_BOTTOM) return;
                                 auto& app = Application::GetInstance();
                                 auto state = app.GetDeviceState();
                                 if (state == kDeviceStateListening ||
                                     state == kDeviceStateSpeaking ||
                                     state == kDeviceStateConnecting) {
-                                    ESP_LOGI("SkyGuardUI", "Swipe-down during AI — exiting chatbot");
+                                    ESP_LOGI("SkyGuardUI", "Swipe-down → exiting chatbot");
                                     app.ToggleChatState();
                                 }
                             }, LV_EVENT_GESTURE, nullptr);
+                            // Single tap exit (tap anywhere on emoji screen)
+                            lv_obj_add_event_cb(scr, [](lv_event_t* e) {
+                                auto& app = Application::GetInstance();
+                                auto state = app.GetDeviceState();
+                                if (state == kDeviceStateListening ||
+                                    state == kDeviceStateSpeaking ||
+                                    state == kDeviceStateConnecting) {
+                                    ESP_LOGI("SkyGuardUI", "Screen tap → exiting chatbot");
+                                    app.ToggleChatState();
+                                }
+                            }, LV_EVENT_CLICKED, nullptr);
                         }
                         lvgl_port_unlock();
                     }
@@ -2650,29 +2674,40 @@ private:
                                   state == kDeviceStateSpeaking ||
                                   state == kDeviceStateConnecting);
 
-                // Auto-exit chatbot: if AI stays in listening for 15s without voice → abort
+                // Auto-exit chatbot: if AI stays in listening for 5s without voice → exit
+                // This prevents ghost mic activations from keeping chatbot active
                 if (ai_active) {
                     board->ai_was_active_ = true;
                     if (state == kDeviceStateListening) {
                         board->ai_idle_counter_++;
-                        if (board->ai_idle_counter_ >= 15 &&
+                        if (board->ai_idle_counter_ >= 5 &&
                             !Application::GetInstance().IsVoiceDetected()) {
-                            ESP_LOGI(TAG, "Auto-exit chatbot: 15s no voice in listening");
-                            Application::GetInstance().StopListening();
+                            ESP_LOGI(TAG, "Auto-exit chatbot: 5s no voice in listening");
+                            Application::GetInstance().ToggleChatState();
+                            board->ai_idle_counter_ = 0;
+                            board->ai_was_active_ = false;
+                        }
+                    } else if (state == kDeviceStateConnecting) {
+                        // Connecting for too long (no WiFi?) → exit after 10s
+                        board->ai_idle_counter_++;
+                        if (board->ai_idle_counter_ >= 10) {
+                            ESP_LOGI(TAG, "Auto-exit chatbot: 10s stuck in connecting");
+                            Application::GetInstance().ToggleChatState();
                             board->ai_idle_counter_ = 0;
                             board->ai_was_active_ = false;
                         }
                     } else {
-                        board->ai_idle_counter_ = 0;  // Reset counter while speaking/connecting
+                        board->ai_idle_counter_ = 0;  // Reset counter while speaking
                     }
                 } else {
                     board->ai_idle_counter_ = 0;
                     board->ai_was_active_ = false;
                 }
 
-                // Boot ready: hide loader on first idle OR after 30s timeout
+                // Boot ready: hide loader on first idle OR after 15s timeout
+                // (was 30s — reduced so offline mode shows SkyGuard dashboard faster)
                 if (!board->boot_ready_fired_ &&
-                    (state == kDeviceStateIdle || board->tick_counter_ > 30)) {
+                    (state == kDeviceStateIdle || board->tick_counter_ > 15)) {
                     board->boot_ready_fired_ = true;
                     board->sg_display_->HideBootLoader();
                     ESP_LOGI(TAG, "SkyGuard AI is ready!");
