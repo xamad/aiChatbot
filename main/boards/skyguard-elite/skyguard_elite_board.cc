@@ -102,6 +102,11 @@ private:
     uint32_t ai_idle_counter_ = 0;    // Seconds since AI went idle after speaking
     bool ai_was_active_ = false;       // Track previous AI state for edge detection
 
+    // Direct touch polling for AI exit (bypasses LVGL event system)
+    bool touch_was_down_ = false;
+    uint32_t touch_down_tick_ = 0;     // Tick when touch first detected
+    uint16_t touch_start_y_ = 0;       // Y coordinate at touch start (for swipe detection)
+
     // Centralized resolved position — ONE source of truth
     // Priority: GPS module → Google WiFi API → NVS fallback (from WebUI config)
     float pos_lat_ = 44.9019f;   // Default: Asti
@@ -1310,11 +1315,8 @@ private:
                             cJSON_Delete(root);
                         }
                     } else {
-                        char* json_err = cJSON_PrintUnformatted(cJSON_CreateObject());
-                        result = "{\"error\":\"timeout\",\"message\":\"PHD2 non raggiungibile\"}";
-                        free(json_err);
-                        free(resp);
-                        return result;
+                        cJSON_Delete(status_json);
+                        return std::string("{\"error\":\"timeout\",\"message\":\"PHD2 non raggiungibile\"}");
                     }
                     // Get guide stats (RMS)
                     if (phd2_rpc("get_guide_stats", nullptr)) {
@@ -3046,6 +3048,38 @@ private:
                 bool ai_active = (state == kDeviceStateListening ||
                                   state == kDeviceStateSpeaking ||
                                   state == kDeviceStateConnecting);
+
+                // Direct touch polling for AI exit — bypasses LVGL event system
+                // which may not deliver events when emoji overlay is active
+                if (ai_active && board->touch_handle_) {
+                    uint16_t tx[1], ty[1];
+                    uint16_t strength[1];
+                    uint8_t count = 0;
+                    esp_lcd_touch_read_data(board->touch_handle_);
+                    bool got = esp_lcd_touch_get_coordinates(board->touch_handle_, tx, ty, strength, &count, 1);
+                    if (got && count > 0) {
+                        if (!board->touch_was_down_) {
+                            // Touch just started
+                            board->touch_was_down_ = true;
+                            board->touch_down_tick_ = board->tick_counter_;
+                            board->touch_start_y_ = ty[0];
+                            ESP_LOGI(TAG, "Touch down during AI: x=%d y=%d", tx[0], ty[0]);
+                        }
+                    } else if (board->touch_was_down_) {
+                        // Touch released — check for tap or swipe
+                        board->touch_was_down_ = false;
+                        uint32_t hold_ticks = board->tick_counter_ - board->touch_down_tick_;
+                        ESP_LOGI(TAG, "Touch up during AI: hold=%lds start_y=%d", (long)hold_ticks, board->touch_start_y_);
+                        if (hold_ticks <= 2) {  // Tap (held < 2 seconds)
+                            ESP_LOGI(TAG, "Touch TAP → exiting chatbot");
+                            Application::GetInstance().ToggleChatState();
+                            board->ai_idle_counter_ = 0;
+                            board->ai_was_active_ = false;
+                        }
+                    }
+                } else if (!ai_active) {
+                    board->touch_was_down_ = false;  // Reset when not in AI mode
+                }
 
                 // Auto-exit chatbot: if AI stays in listening for 5s without voice → exit
                 // This prevents ghost mic activations from keeping chatbot active
