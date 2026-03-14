@@ -166,6 +166,40 @@ private:
         bool initialized = false;
     } alerts_;
 
+    // AHT20 validation — reject bogus readings at startup
+    bool aht20_validated_ = false;
+    int aht20_stable_count_ = 0;
+    float aht20_last_temp_ = -999.0f;
+
+    bool ValidateAht20Reading() {
+        if (!aht20_) return false;
+        float t = aht20_->GetTemperature();
+        float h = aht20_->GetHumidity();
+        // Range check
+        if (t < -40.0f || t > 60.0f || h < 0.0f || h > 100.0f) {
+            ESP_LOGW(TAG, "AHT20 out of range: T=%.1f H=%.1f — discarding", t, h);
+            aht20_stable_count_ = 0;
+            return false;
+        }
+        // Stability check: reject if >15°C jump from previous reading
+        if (aht20_last_temp_ > -900.0f && fabsf(t - aht20_last_temp_) > 15.0f) {
+            ESP_LOGW(TAG, "AHT20 unstable: T=%.1f prev=%.1f (diff=%.1f) — discarding", t, aht20_last_temp_, fabsf(t - aht20_last_temp_));
+            aht20_last_temp_ = t;
+            aht20_stable_count_ = 0;
+            return false;
+        }
+        aht20_last_temp_ = t;
+        aht20_stable_count_++;
+        if (aht20_stable_count_ >= 2) {
+            if (!aht20_validated_) {
+                ESP_LOGI(TAG, "AHT20 validated: T=%.1f H=%.1f (2 stable readings)", t, h);
+                aht20_validated_ = true;
+            }
+            return true;
+        }
+        return false;
+    }
+
     // Dew heater state
     int dew_gpio_ = -1;               // -1 = not configured
     int dew_mode_ = 0;                // 0=off, 1=on, 2=auto
@@ -786,10 +820,13 @@ private:
             "Leggi temperatura, umidita', punto di rugiada, rischio condensa",
             PropertyList(),
             [this](const PropertyList& props) -> ReturnValue {
-                if (!aht20_) return false; //"AHT20 not available");
+                if (!aht20_) return false;
+                if (!aht20_validated_) {
+                    return std::string("{\"error\":\"sensor_initializing\",\"message\":\"Sensore in fase di inizializzazione\"}");
+                }
 
                 if (!aht20_->Measure()) {
-                    return false; //"Environment measurement failed");
+                    return false;
                 }
 
                 char buf[256];
@@ -1091,25 +1128,50 @@ private:
                 std::string result;
 
                 if (action == "status") {
+                    // Query multiple NINA endpoints for complete status
+                    cJSON* status_json = cJSON_CreateObject();
+                    // Camera info
                     snprintf(url, sizeof(url), "%s/api/v2/equipment/camera/info", nina_url.c_str());
-                    ok = SkyGuardHttp::Get(url, resp, 4096, 5000);
+                    ok = SkyGuardHttp::Get(url, resp, 4096, 3000);
                     if (ok) {
-                        cJSON* root = cJSON_Parse(resp);
-                        if (root) {
-                            const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "Name"));
-                            cJSON* connected = cJSON_GetObjectItem(root, "Connected");
-                            cJSON* temp_item = cJSON_GetObjectItem(root, "Temperature");
-                            char buf[256];
-                            snprintf(buf, sizeof(buf), "Camera=%s, Connected=%s, Temp=%.1f°C",
-                                name ? name : "N/A",
-                                (connected && cJSON_IsTrue(connected)) ? "SI" : "NO",
-                                temp_item ? temp_item->valuedouble : 0.0);
-                            result = buf;
-                            cJSON_Delete(root);
-                        } else {
-                            result = std::string("Risposta: ") + resp;
+                        cJSON* cam = cJSON_Parse(resp);
+                        if (cam) {
+                            const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(cam, "Name"));
+                            cJSON* connected = cJSON_GetObjectItem(cam, "Connected");
+                            cJSON_AddStringToObject(status_json, "camera", name ? name : "N/A");
+                            cJSON_AddBoolToObject(status_json, "connected", connected && cJSON_IsTrue(connected));
+                            cJSON* temp_item = cJSON_GetObjectItem(cam, "Temperature");
+                            if (temp_item) cJSON_AddNumberToObject(status_json, "sensor_temp", temp_item->valuedouble);
+                            cJSON_Delete(cam);
                         }
                     }
+                    // Imaging status
+                    snprintf(url, sizeof(url), "%s/api/v2/imaging/status", nina_url.c_str());
+                    if (SkyGuardHttp::Get(url, resp, 4096, 3000)) {
+                        cJSON* img = cJSON_Parse(resp);
+                        if (img) {
+                            const char* st = cJSON_GetStringValue(cJSON_GetObjectItem(img, "Status"));
+                            cJSON_AddStringToObject(status_json, "status", st ? st : "Idle");
+                            cJSON* prog = cJSON_GetObjectItem(img, "Progress");
+                            if (prog) cJSON_AddNumberToObject(status_json, "progress", prog->valuedouble * 100);
+                            const char* filt = cJSON_GetStringValue(cJSON_GetObjectItem(img, "Filter"));
+                            if (filt) cJSON_AddStringToObject(status_json, "filter", filt);
+                            cJSON* exp = cJSON_GetObjectItem(img, "ExposureTime");
+                            if (exp) cJSON_AddNumberToObject(status_json, "exposure", exp->valuedouble);
+                            cJSON* hfr = cJSON_GetObjectItem(img, "HFR");
+                            if (hfr) cJSON_AddNumberToObject(status_json, "hfr", hfr->valuedouble);
+                            cJSON* stars = cJSON_GetObjectItem(img, "Stars");
+                            if (stars) cJSON_AddNumberToObject(status_json, "stars", stars->valueint);
+                            cJSON_Delete(img);
+                        }
+                    } else {
+                        cJSON_AddStringToObject(status_json, "status", "Idle");
+                    }
+                    char* json_str = cJSON_PrintUnformatted(status_json);
+                    result = json_str ? std::string(json_str) : "{\"error\":\"timeout\",\"message\":\"NINA non raggiungibile\"}";
+                    free(json_str);
+                    cJSON_Delete(status_json);
+                    ok = true;
                 } else if (action == "start_sequence") {
                     snprintf(url, sizeof(url), "%s/api/v2/sequence/start", nina_url.c_str());
                     ok = SkyGuardHttp::Post(url, "{}", resp, 4096, 10000);
@@ -1236,36 +1298,55 @@ private:
                 };
 
                 if (action == "status") {
+                    cJSON* status_json = cJSON_CreateObject();
+                    // Get app state
                     ok = phd2_rpc("get_app_state", nullptr);
                     if (ok) {
                         cJSON* root = cJSON_Parse(resp);
                         if (root) {
                             cJSON* res = cJSON_GetObjectItem(root, "result");
-                            char buf[256];
-                            snprintf(buf, sizeof(buf), "PHD2 stato: %s",
-                                res && res->valuestring ? res->valuestring : "sconosciuto");
-
-                            // Also get star info
+                            const char* state = (res && res->valuestring) ? res->valuestring : "Unknown";
+                            cJSON_AddStringToObject(status_json, "status", state);
                             cJSON_Delete(root);
-
-                            // Get pixel scale if available
-                            if (phd2_rpc("get_pixel_scale", nullptr)) {
-                                cJSON* ps = cJSON_Parse(resp);
-                                if (ps) {
-                                    cJSON* ps_r = cJSON_GetObjectItem(ps, "result");
-                                    if (ps_r && cJSON_IsNumber(ps_r)) {
-                                        char extra[64];
-                                        snprintf(extra, sizeof(extra), ", PixelScale=%.2f\"/px", ps_r->valuedouble);
-                                        strcat(buf, extra);
-                                    }
-                                    cJSON_Delete(ps);
-                                }
+                        }
+                    } else {
+                        char* json_err = cJSON_PrintUnformatted(cJSON_CreateObject());
+                        result = "{\"error\":\"timeout\",\"message\":\"PHD2 non raggiungibile\"}";
+                        free(json_err);
+                        free(resp);
+                        return result;
+                    }
+                    // Get guide stats (RMS)
+                    if (phd2_rpc("get_guide_stats", nullptr)) {
+                        cJSON* gs = cJSON_Parse(resp);
+                        if (gs) {
+                            cJSON* res = cJSON_GetObjectItem(gs, "result");
+                            if (res) {
+                                cJSON* rms_ra = cJSON_GetObjectItem(res, "rms_ra");
+                                cJSON* rms_dec = cJSON_GetObjectItem(res, "rms_dec");
+                                cJSON* rms_tot = cJSON_GetObjectItem(res, "rms_tot");
+                                if (rms_ra) cJSON_AddNumberToObject(status_json, "rms_ra", rms_ra->valuedouble);
+                                if (rms_dec) cJSON_AddNumberToObject(status_json, "rms_dec", rms_dec->valuedouble);
+                                if (rms_tot) cJSON_AddNumberToObject(status_json, "rms_total", rms_tot->valuedouble);
                             }
-                            result = buf;
-                        } else {
-                            result = "Risposta non valida da PHD2";
+                            cJSON_Delete(gs);
                         }
                     }
+                    // Get pixel scale
+                    if (phd2_rpc("get_pixel_scale", nullptr)) {
+                        cJSON* ps = cJSON_Parse(resp);
+                        if (ps) {
+                            cJSON* ps_r = cJSON_GetObjectItem(ps, "result");
+                            if (ps_r && cJSON_IsNumber(ps_r))
+                                cJSON_AddNumberToObject(status_json, "pixel_scale", ps_r->valuedouble);
+                            cJSON_Delete(ps);
+                        }
+                    }
+                    char* json_str = cJSON_PrintUnformatted(status_json);
+                    result = json_str ? std::string(json_str) : "{}";
+                    free(json_str);
+                    cJSON_Delete(status_json);
+                    ok = true;
                 } else if (action == "start_guide" || action == "guide") {
                     float settle_px = std::strtof(props["settle_pixels"].value<std::string>().c_str(), nullptr);
                     float settle_t = std::strtof(props["settle_time"].value<std::string>().c_str(), nullptr);
@@ -1387,19 +1468,23 @@ private:
                 }
 
                 if (action == "status") {
-                    float spread = 99;
-                    if (aht20_) {
+                    float temp_val = 0, dew_val = 0, spread = 99;
+                    if (aht20_ && aht20_validated_) {
                         aht20_->Measure();
-                        float temp = aht20_->GetTemperature() + temp_offset_;
-                        float dew = aht20_->GetDewPoint();
-                        spread = temp - dew;
+                        temp_val = aht20_->GetTemperature() + temp_offset_;
+                        dew_val = aht20_->GetDewPoint();
+                        spread = temp_val - dew_val;
                     }
-                    const char* mode_str = dew_mode_ == 0 ? "OFF" : dew_mode_ == 1 ? "ON" : "AUTO";
+                    const char* status_str = dew_heater_active_ ? "on" : "off";
+                    const char* mode_str = dew_mode_ == 0 ? "manual" : dew_mode_ == 1 ? "manual" : "auto";
                     char buf[256];
                     snprintf(buf, sizeof(buf),
-                        "Modo=%s, Attivo=%s, Potenza=%d%%, GPIO=%d, Spread=%.1f°C, Soglia=%.1f°C",
-                        mode_str, dew_heater_active_ ? "SI" : "NO",
-                        dew_power_, dew_gpio_, spread, dew_threshold_);
+                        "{\"status\":\"%s\",\"mode\":\"%s\",\"power_pct\":%d,"
+                        "\"temp\":%.1f,\"dew_point\":%.1f,\"dew_margin\":%.1f,"
+                        "\"threshold\":%.1f,\"gpio\":%d}",
+                        status_str, mode_str, dew_power_,
+                        temp_val, dew_val, spread,
+                        dew_threshold_, dew_gpio_);
                     return std::string(buf);
                 } else if (action == "on") {
                     std::string pwr = props["power"].value<std::string>();
@@ -1600,70 +1685,9 @@ private:
                 return result;
             });
 
-        // --- device.astrometry.solve ---
-        mcp.AddTool("device.astrometry.solve",
-            "Plate solving via Astrometry.net cloud (gratuito). "
-            "Invia un'immagine catturata da NINA/INDI per identificare la posizione nel cielo. "
-            "Azioni: submit (invia URL immagine), status (controlla stato job), result (ottieni risultato). "
-            "Nota: il solving richiede 30-120 secondi.",
-            PropertyList({
-                Property("action", kPropertyTypeString, std::string("status")),
-                Property("image_url", kPropertyTypeString, std::string("")),
-                Property("job_id", kPropertyTypeString, std::string("")),
-                Property("submission_id", kPropertyTypeString, std::string("")),
-            }),
-            [this](const PropertyList& props) -> ReturnValue {
-                std::string action = props["action"].value<std::string>();
-                const char* api_base = "https://nova.astrometry.net/api";
-                char url[256];
-                char* resp = SkyGuardHttp::AllocBuffer(4096);
-                if (!resp) return std::string("Errore: memoria insufficiente");
-                std::string result;
+        // device.astrometry.solve REMOVED — plate solving is done locally via NINA (ASTAP)
 
-                if (action == "status") {
-                    std::string sub_str = props["submission_id"].value<std::string>();
-                    int sub_id = sub_str.empty() ? 0 : std::atoi(sub_str.c_str());
-                    if (sub_id <= 0) { free(resp); return std::string("Specifica submission_id per controllare lo stato"); }
-                    snprintf(url, sizeof(url), "%s/submissions/%d", api_base, sub_id);
-                    if (SkyGuardHttp::Get(url, resp, 4096, 15000)) {
-                        result = std::string("Submission status: ") + resp;
-                    } else {
-                        result = "Errore verifica submission";
-                    }
-                } else if (action == "result") {
-                    std::string job_str = props["job_id"].value<std::string>();
-                    int job_id = job_str.empty() ? 0 : std::atoi(job_str.c_str());
-                    if (job_id <= 0) { free(resp); return std::string("Specifica job_id per ottenere il risultato"); }
-                    snprintf(url, sizeof(url), "%s/jobs/%d/calibration", api_base, job_id);
-                    if (SkyGuardHttp::Get(url, resp, 4096, 15000)) {
-                        result = std::string("Plate solve result: ") + resp;
-                    } else {
-                        result = "Errore lettura risultato";
-                    }
-                } else if (action == "submit") {
-                    std::string img_url = props["image_url"].value<std::string>();
-                    if (img_url.empty()) { free(resp); return std::string("Specifica image_url (URL pubblico dell'immagine FITS/JPG)"); }
-                    // Submit URL for solving (no API key needed for public submissions)
-                    snprintf(url, sizeof(url), "%s/url_upload", api_base);
-                    char body[512];
-                    snprintf(body, sizeof(body),
-                        "{\"request-json\":\"{\\\"url\\\":\\\"%s\\\",\\\"allow_commercial_use\\\":\\\"n\\\",\\\"allow_modifications\\\":\\\"n\\\"}\"}",
-                        img_url.c_str());
-                    if (SkyGuardHttp::Post(url, body, resp, 4096, 30000)) {
-                        result = std::string("Submission inviata: ") + resp;
-                    } else {
-                        result = "Errore submit immagine";
-                    }
-                } else {
-                    free(resp);
-                    return std::string("Azione non valida. Usa: submit, status, result");
-                }
-
-                free(resp);
-                return result;
-            });
-
-        ESP_LOGI(TAG, "Registered 17 SkyGuard MCP tools");
+        ESP_LOGI(TAG, "Registered 16 SkyGuard MCP tools");
     }
 
     // =========================================================================
@@ -2525,7 +2549,7 @@ private:
             cJSON_AddNumberToObject(root, "mpsas", tsl2591_->GetMpsas());
             cJSON_AddNumberToObject(root, "nelm", tsl2591_->GetNelm());
         }
-        if (aht20_) {
+        if (aht20_ && aht20_validated_) {
             cJSON_AddNumberToObject(root, "temperature", aht20_->GetTemperature() + temp_offset_);
             float hum_flat = aht20_->GetHumidity() + hum_offset_;
             if (hum_flat > 100.0f) hum_flat = 100.0f;
@@ -2546,6 +2570,32 @@ private:
             if (fc_flat.count > 0) cloud_cover = fc_flat.entries[0].clouds;
         }
         cJSON_AddNumberToObject(root, "cloud_cover", cloud_cover);
+        cJSON_AddNumberToObject(root, "altitude", alt);
+        // Sky condition from cloud cover
+        const char* sky_cond = "clear";
+        if (cloud_cover > 80) sky_cond = "overcast";
+        else if (cloud_cover > 50) sky_cond = "cloudy";
+        else if (cloud_cover > 20) sky_cond = "partly_cloudy";
+        cJSON_AddStringToObject(root, "sky_condition", sky_cond);
+        // Dew point and spread
+        if (aht20_) {
+            float dew_flat = aht20_->GetDewPoint();
+            float temp_flat = aht20_->GetTemperature() + temp_offset_;
+            cJSON_AddNumberToObject(root, "dew_point", dew_flat);
+            cJSON_AddNumberToObject(root, "spread", temp_flat - dew_flat);
+        }
+        // Wind speed from weather forecast if available
+        if (weather_ && weather_->HasData()) {
+            ForecastData fc_w = weather_->GetForecast();
+            if (fc_w.count > 0) cJSON_AddNumberToObject(root, "wind_speed", fc_w.entries[0].wind_speed);
+        }
+        // SQM confidence and bortle
+        if (tsl2591_) {
+            cJSON_AddNumberToObject(root, "sqm_confidence", tsl2591_->GetConfidence());
+            cJSON_AddNumberToObject(root, "bortle", tsl2591_->GetBortle());
+        }
+        cJSON_AddStringToObject(root, "firmware_version", "2.2.0");
+        cJSON_AddStringToObject(root, "position_source", pos_source_);
 
         // --- device ---
         cJSON* dev = cJSON_AddObjectToObject(root, "device");
@@ -3288,9 +3338,10 @@ private:
                         }
                     }
                 }
-                // AHT20 (Temp/Hum) — every 10s
+                // AHT20 (Temp/Hum) — every 10s, with validation at boot
                 if (board->aht20_ && board->tick_counter_ % 10 == 0) {
                     board->aht20_->Measure();
+                    board->ValidateAht20Reading();
                 }
 
                 // Dew heater auto mode — check every 30s
