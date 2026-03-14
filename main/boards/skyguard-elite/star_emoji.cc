@@ -9,75 +9,52 @@
 using namespace star_colors;
 
 // ============================================================================
-// STAR SHAPE GENERATION — 64x64
+// STAR SHAPE — Smooth polar star with rounded tips (like glossy 3D reference)
 // ============================================================================
 
 void StarEmoji32::GenerateStarMask(uint8_t* alpha) {
     memset(alpha, 0, SIZE * SIZE);
 
     const float cx = 31.5f, cy = 31.5f;
-    const float outer_r = 29.0f;
-    const float inner_r = 18.0f;  // Chubby star — wider body for face features
-
-    float vx[10], vy[10];
-    for (int i = 0; i < 10; i++) {
-        float angle = -M_PI / 2.0f + i * M_PI / 5.0f;
-        float r = (i % 2 == 0) ? outer_r : inner_r;
-        vx[i] = cx + r * cosf(angle);
-        vy[i] = cy + r * sinf(angle);
-    }
+    const float outer_r = 29.0f;   // Tip radius
+    const float inner_r = 21.0f;   // Valley radius (ratio ~0.72 = extra chubby)
 
     for (int y = 0; y < SIZE; y++) {
-        float intersections[20];
-        int num = 0;
-        for (int i = 0; i < 10; i++) {
-            int j = (i + 1) % 10;
-            float y0 = vy[i], y1 = vy[j];
-            if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
-                float t = (y - y0) / (y1 - y0);
-                if (num < 20) intersections[num++] = vx[i] + t * (vx[j] - vx[i]);
-            }
-        }
-        for (int a = 0; a < num - 1; a++)
-            for (int b = a + 1; b < num; b++)
-                if (intersections[b] < intersections[a]) {
-                    float tmp = intersections[a];
-                    intersections[a] = intersections[b];
-                    intersections[b] = tmp;
-                }
-        for (int k = 0; k + 1 < num; k += 2) {
-            int xs = (int)(intersections[k] + 0.5f);
-            int xe = (int)(intersections[k + 1] + 0.5f);
-            if (xs < 0) xs = 0;
-            if (xe > SIZE - 1) xe = SIZE - 1;
-            for (int x = xs; x <= xe; x++)
-                alpha[y * SIZE + x] = 255;
-        }
-    }
+        for (int x = 0; x < SIZE; x++) {
+            float dx = x - cx;
+            float dy = y - cy;
+            float dist = sqrtf(dx * dx + dy * dy);
+            float angle = atan2f(dy, dx);
 
-    // Anti-alias edges
-    uint8_t* temp = (uint8_t*)malloc(SIZE * SIZE);
-    if (temp) {
-        memcpy(temp, alpha, SIZE * SIZE);
-        for (int y = 1; y < SIZE - 1; y++) {
-            for (int x = 1; x < SIZE - 1; x++) {
-                if (temp[y * SIZE + x] == 255) {
-                    if (temp[(y-1)*SIZE+x] == 0 || temp[(y+1)*SIZE+x] == 0 ||
-                        temp[y*SIZE+x-1] == 0 || temp[y*SIZE+x+1] == 0) {
-                        alpha[y * SIZE + x] = 180;
-                    }
-                }
-            }
+            // Rotate so top point faces up
+            float a = angle + (float)M_PI * 0.5f;
+            if (a < 0) a += (float)M_PI * 2.0f;
+
+            // Smooth star function: cos(5*a) creates 5 peaks
+            // t goes 0 (valley) to 1 (peak)
+            float t = 0.5f * (1.0f + cosf(5.0f * a));
+
+            // Mild rounding — keep star points visible but not sharp
+            t = powf(t, 0.75f);
+
+            float r = inner_r + (outer_r - inner_r) * t;
+
+            // Anti-aliased edge with 1.8px gradient
+            float edge = r - dist;
+            if (edge > 1.8f)
+                alpha[y * SIZE + x] = 255;
+            else if (edge > 0)
+                alpha[y * SIZE + x] = (uint8_t)(edge / 1.8f * 255.0f);
+            else
+                alpha[y * SIZE + x] = 0;
         }
-        free(temp);
     }
 }
 
 // ============================================================================
-// COLOR FILL — RGB565 stored little-endian
+// 3D GLOSSY FILL — Multi-highlight shading like reference image
 // ============================================================================
 
-// Blend two RGB565 colors by factor t (0.0 = c1, 1.0 = c2)
 static uint16_t BlendRGB565(uint16_t c1, uint16_t c2, float t) {
     if (t <= 0.0f) return c1;
     if (t >= 1.0f) return c2;
@@ -89,16 +66,13 @@ static uint16_t BlendRGB565(uint16_t c1, uint16_t c2, float t) {
     return ((r & 0x1F) << 11) | ((g & 0x3F) << 5) | (b & 0x1F);
 }
 
-void StarEmoji32::FillStarColor(uint8_t* rgb, const uint8_t* alpha,
-                                 uint16_t body_color, uint16_t outline_color) {
-    // Light source at top-left (20, 14)
-    const float light_x = 20.0f, light_y = 14.0f;
+void StarEmoji32::FillStarColor(uint8_t* rgb, const uint8_t* alpha) {
     const float cx = 31.5f, cy = 31.5f;
 
-    // Darker shade for bottom-right shadow
-    static const uint16_t SHADOW = star_colors::RGB565(160, 110, 10);
-    // Bright specular color
-    static const uint16_t SPECULAR = star_colors::RGB565(255, 245, 200);
+    // Primary light: upper-left (matching reference highlights)
+    const float lx1 = 18.0f, ly1 = 12.0f;
+    // Secondary light: upper-right (subtle fill)
+    const float lx2 = 44.0f, ly2 = 16.0f;
 
     for (int y = 0; y < SIZE; y++) {
         for (int x = 0; x < SIZE; x++) {
@@ -109,49 +83,93 @@ void StarEmoji32::FillStarColor(uint8_t* rgb, const uint8_t* alpha,
                 continue;
             }
 
-            // Edge pixels get outline color
+            // --- Base color: vertical gradient (bright top → deep gold bottom)
+            float vert = (float)y / (float)SIZE;  // 0=top, 1=bottom
+            uint16_t base;
+            if (vert < 0.3f) {
+                base = BlendRGB565(STAR_TOP, STAR_BODY, vert / 0.3f);
+            } else {
+                base = BlendRGB565(STAR_BODY, STAR_BOTTOM, (vert - 0.3f) / 0.7f);
+            }
+
+            // --- Shadow: distance from center, bottom-right darkening
+            float dx_c = (x - cx) / 32.0f;
+            float dy_c = (y - cy) / 32.0f;
+            float center_dist = sqrtf(dx_c * dx_c + dy_c * dy_c);
+            // Bottom-right shadow bias
+            float shadow_bias = (dx_c * 0.3f + dy_c * 0.5f);
+            if (shadow_bias > 0) {
+                base = BlendRGB565(base, STAR_SHADOW, shadow_bias * 0.35f);
+            }
+
+            // --- Edge rim: pixels near alpha boundary get orange rim
+            bool near_edge = false;
+            int edge_dist = 99;
+            for (int ey = -3; ey <= 3 && !near_edge; ey++) {
+                for (int ex = -3; ex <= 3 && !near_edge; ex++) {
+                    int nx = x + ex, ny = y + ey;
+                    if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+                        if (alpha[ny * SIZE + nx] == 0) {
+                            near_edge = true;
+                            int d = abs(ex) + abs(ey);
+                            if (d < edge_dist) edge_dist = d;
+                        }
+                    }
+                }
+            }
+            if (near_edge) {
+                float rim_strength = (edge_dist <= 2) ? 0.6f : 0.3f;
+                base = BlendRGB565(base, STAR_EDGE, rim_strength);
+            }
+
+            // Semi-transparent edge pixels: blend more toward rim color
             if (a < 255) {
-                rgb[idx]     = outline_color & 0xFF;
-                rgb[idx + 1] = (outline_color >> 8) & 0xFF;
+                base = BlendRGB565(base, STAR_EDGE, 0.7f);
+                rgb[idx]     = base & 0xFF;
+                rgb[idx + 1] = (base >> 8) & 0xFF;
                 continue;
             }
 
-            // Distance from light source (normalized 0..1)
-            float dx = (x - light_x) / (float)SIZE;
-            float dy = (y - light_y) / (float)SIZE;
-            float dist_light = sqrtf(dx * dx + dy * dy);
-
-            // Gradient: near light = bright body, far = shadow
-            float shade = dist_light * 1.4f;  // Scale so bottom-right gets darker
-            if (shade > 1.0f) shade = 1.0f;
-            uint16_t base = BlendRGB565(body_color, SHADOW, shade * 0.55f);
-
-            // Specular highlight — small bright spot near light source
-            if (dist_light < 0.18f) {
-                float spec = 1.0f - (dist_light / 0.18f);
-                spec = spec * spec;  // Quadratic falloff for sharp highlight
-                base = BlendRGB565(base, SPECULAR, spec * 0.85f);
+            // --- Primary specular highlight (upper-left, like reference)
+            float dx1 = (x - lx1) / (float)SIZE;
+            float dy1 = (y - ly1) / (float)SIZE;
+            float d1 = sqrtf(dx1 * dx1 + dy1 * dy1);
+            // Hot spot — very small, near-white
+            if (d1 < 0.12f) {
+                float s = 1.0f - (d1 / 0.12f);
+                s = s * s * s;  // Cubic falloff for sharp glare
+                base = BlendRGB565(base, SPECULAR_HOT, s * 0.9f);
+            }
+            // Medium glow around hot spot
+            if (d1 < 0.25f) {
+                float s = 1.0f - (d1 / 0.25f);
+                s = s * s;
+                base = BlendRGB565(base, SPECULAR_MID, s * 0.45f);
+            }
+            // Broad warm highlight
+            if (d1 < 0.42f) {
+                float s = 1.0f - (d1 / 0.42f);
+                base = BlendRGB565(base, HIGHLIGHT, s * 0.25f);
             }
 
-            // Secondary soft highlight — broader area
-            if (dist_light < 0.35f) {
-                float soft = 1.0f - (dist_light / 0.35f);
-                base = BlendRGB565(base, HIGHLIGHT, soft * 0.3f);
+            // --- Secondary highlight (upper-right, subtle)
+            float dx2 = (x - lx2) / (float)SIZE;
+            float dy2 = (y - ly2) / (float)SIZE;
+            float d2 = sqrtf(dx2 * dx2 + dy2 * dy2);
+            if (d2 < 0.15f) {
+                float s = 1.0f - (d2 / 0.15f);
+                s = s * s;
+                base = BlendRGB565(base, SPECULAR_MID, s * 0.35f);
             }
 
-            // Edge darkening — pixels near alpha boundary get slightly darker
-            // Check if any neighbor is transparent
-            bool near_edge = false;
-            for (int ey = -2; ey <= 2 && !near_edge; ey++)
-                for (int ex = -2; ex <= 2 && !near_edge; ex++) {
-                    int nx = x + ex, ny = y + ey;
-                    if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
-                        if (alpha[ny * SIZE + nx] == 0)
-                            near_edge = true;
-                    }
-                }
-            if (near_edge) {
-                base = BlendRGB565(base, outline_color, 0.4f);
+            // --- Bottom rim highlight (subtle reflected light, like reference)
+            float dx3 = (x - 35.0f) / (float)SIZE;
+            float dy3 = (y - 52.0f) / (float)SIZE;
+            float d3 = sqrtf(dx3 * dx3 + dy3 * dy3);
+            if (d3 < 0.1f) {
+                float s = 1.0f - (d3 / 0.1f);
+                s = s * s;
+                base = BlendRGB565(base, HIGHLIGHT, s * 0.2f);
             }
 
             rgb[idx]     = base & 0xFF;
@@ -161,7 +179,7 @@ void StarEmoji32::FillStarColor(uint8_t* rgb, const uint8_t* alpha,
 }
 
 // ============================================================================
-// DRAWING PRIMITIVES — all coords for 64x64
+// DRAWING PRIMITIVES
 // ============================================================================
 
 void StarEmoji32::DrawPixel(uint8_t* rgb, int x, int y, uint16_t color) {
@@ -171,11 +189,39 @@ void StarEmoji32::DrawPixel(uint8_t* rgb, int x, int y, uint16_t color) {
     rgb[idx + 1] = (color >> 8) & 0xFF;
 }
 
+void StarEmoji32::DrawPixelAlpha(uint8_t* rgb, int x, int y, uint16_t color, float a) {
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE || a <= 0.0f) return;
+    if (a >= 1.0f) { DrawPixel(rgb, x, y, color); return; }
+    int idx = (y * SIZE + x) * 2;
+    uint16_t bg = rgb[idx] | (rgb[idx + 1] << 8);
+    uint16_t blended = BlendRGB565(bg, color, a);
+    rgb[idx]     = blended & 0xFF;
+    rgb[idx + 1] = (blended >> 8) & 0xFF;
+}
+
 void StarEmoji32::DrawDot(uint8_t* rgb, int cx, int cy, int r, uint16_t color) {
     for (int dy = -r; dy <= r; dy++)
         for (int dx = -r; dx <= r; dx++)
             if (dx * dx + dy * dy <= r * r)
                 DrawPixel(rgb, cx + dx, cy + dy, color);
+}
+
+// Anti-aliased filled circle (sub-pixel precision)
+void StarEmoji32::DrawSoftDot(uint8_t* rgb, float cx, float cy, float r, uint16_t color) {
+    int x0 = (int)(cx - r - 1), x1 = (int)(cx + r + 1);
+    int y0 = (int)(cy - r - 1), y1 = (int)(cy + r + 1);
+    for (int y = y0; y <= y1; y++) {
+        for (int x = x0; x <= x1; x++) {
+            float dx = x - cx, dy = y - cy;
+            float dist = sqrtf(dx * dx + dy * dy);
+            if (dist <= r - 0.8f) {
+                DrawPixel(rgb, x, y, color);
+            } else if (dist < r + 0.5f) {
+                float a = 1.0f - (dist - (r - 0.8f)) / 1.3f;
+                if (a > 0) DrawPixelAlpha(rgb, x, y, color, a);
+            }
+        }
+    }
 }
 
 void StarEmoji32::DrawLine(uint8_t* rgb, int x0, int y0, int x1, int y1, uint16_t color) {
@@ -194,174 +240,237 @@ void StarEmoji32::DrawLine(uint8_t* rgb, int x0, int y0, int x1, int y1, uint16_
 void StarEmoji32::DrawArc(uint8_t* rgb, int cx, int cy, int r,
                            int start_deg, int end_deg, uint16_t color) {
     for (int deg = start_deg; deg <= end_deg; deg += 2) {
-        float rad = deg * M_PI / 180.0f;
+        float rad = deg * (float)M_PI / 180.0f;
         DrawPixel(rgb, cx + (int)(r * cosf(rad) + 0.5f),
                        cy + (int)(r * sinf(rad) + 0.5f), color);
     }
 }
 
+void StarEmoji32::DrawThickArc(uint8_t* rgb, int cx, int cy, float r, float thickness,
+                                int start_deg, int end_deg, uint16_t color) {
+    for (int deg = start_deg; deg <= end_deg; deg += 1) {
+        float rad = deg * (float)M_PI / 180.0f;
+        float px = cx + r * cosf(rad);
+        float py = cy + r * sinf(rad);
+        DrawSoftDot(rgb, px, py, thickness * 0.5f, color);
+    }
+}
+
 // ============================================================================
-// EYE EXPRESSIONS — scaled to 64x64 (roughly 2x the 32x32 coords)
+// CUTE EYE — Kawaii style: black pupil + iris ring + white shine dots
 // ============================================================================
 
+void StarEmoji32::DrawCuteEye(uint8_t* rgb, int cx, int cy, int r, bool look_up) {
+    int ey = look_up ? cy - 1 : cy;
+
+    // Outer iris ring (dark brown, slightly larger)
+    DrawSoftDot(rgb, cx, ey, r + 0.8f, EYE_BROWN);
+    // Main pupil (deep black)
+    DrawSoftDot(rgb, cx, ey, (float)r, EYE_BLACK);
+
+    if (r >= 3) {
+        // Primary shine — upper-left of pupil (large, bright white)
+        DrawSoftDot(rgb, cx - r * 0.35f, ey - r * 0.4f, r * 0.4f, EYE_SHINE);
+        // Secondary shine — lower-right (smaller, subtle)
+        DrawSoftDot(rgb, cx + r * 0.3f, ey + r * 0.35f, r * 0.2f, EYE_SHINE2);
+    } else {
+        // Small eyes: just a single shine pixel
+        DrawPixel(rgb, cx - 1, ey - 1, EYE_SHINE);
+    }
+}
+
+void StarEmoji32::DrawClosedEye(uint8_t* rgb, int cx, int cy) {
+    // Curved closed eye — arc with slight thickness
+    DrawThickArc(rgb, cx, cy - 1, 5.0f, 2.0f, 10, 170, MOUTH);
+}
+
+// ============================================================================
+// EYE EXPRESSIONS — cute kawaii style, 64x64
+// ============================================================================
+
+// Eye positions (tuned for puffy star body)
+static constexpr int EL_X = 22, ER_X = 41, EY = 29;
+
 void StarEmoji32::DrawEyesNormal(uint8_t* rgb) {
-    DrawDot(rgb, 22, 28, 3, EYES);
-    DrawDot(rgb, 41, 28, 3, EYES);
+    DrawCuteEye(rgb, EL_X, EY, 4);
+    DrawCuteEye(rgb, ER_X, EY, 4);
 }
 
 void StarEmoji32::DrawEyesHappy(uint8_t* rgb) {
-    DrawArc(rgb, 22, 28, 5, 200, 340, EYES);
-    DrawArc(rgb, 22, 28, 4, 200, 340, EYES);
-    DrawArc(rgb, 41, 28, 5, 200, 340, EYES);
-    DrawArc(rgb, 41, 28, 4, 200, 340, EYES);
+    // Closed happy arcs (upside-down U) — "squint smile"
+    DrawThickArc(rgb, EL_X, EY + 1, 5.0f, 2.2f, 200, 340, MOUTH);
+    DrawThickArc(rgb, ER_X, EY + 1, 5.0f, 2.2f, 200, 340, MOUTH);
 }
 
 void StarEmoji32::DrawEyesSad(uint8_t* rgb) {
-    DrawDot(rgb, 22, 30, 3, EYES);
-    DrawDot(rgb, 41, 30, 3, EYES);
-    // Sad eyebrows
-    DrawLine(rgb, 17, 23, 27, 21, EYES);
-    DrawLine(rgb, 17, 24, 27, 22, EYES);
-    DrawLine(rgb, 36, 21, 46, 23, EYES);
-    DrawLine(rgb, 36, 22, 46, 24, EYES);
+    DrawCuteEye(rgb, EL_X, EY + 1, 4);
+    DrawCuteEye(rgb, ER_X, EY + 1, 4);
+    // Sad eyebrows — inner ends up
+    DrawThickArc(rgb, EL_X, EY - 6, 8.0f, 1.5f, 340, 380, MOUTH);
+    DrawThickArc(rgb, ER_X, EY - 6, 8.0f, 1.5f, 160, 200, MOUTH);
 }
 
 void StarEmoji32::DrawEyesAngry(uint8_t* rgb) {
-    DrawDot(rgb, 22, 30, 3, EYES);
-    DrawDot(rgb, 41, 30, 3, EYES);
-    // Angry eyebrows (furrowed)
-    DrawLine(rgb, 16, 22, 27, 26, EYES);
-    DrawLine(rgb, 16, 23, 27, 27, EYES);
-    DrawLine(rgb, 36, 26, 47, 22, EYES);
-    DrawLine(rgb, 36, 27, 47, 23, EYES);
+    DrawCuteEye(rgb, EL_X, EY + 1, 3);
+    DrawCuteEye(rgb, ER_X, EY + 1, 3);
+    // Angry furrowed brows — inner ends down
+    DrawLine(rgb, 16, 22, 28, 26, MOUTH);
+    DrawLine(rgb, 16, 23, 28, 27, MOUTH);
+    DrawLine(rgb, 35, 26, 47, 22, MOUTH);
+    DrawLine(rgb, 35, 27, 47, 23, MOUTH);
 }
 
 void StarEmoji32::DrawEyesSurprised(uint8_t* rgb) {
-    DrawDot(rgb, 22, 28, 5, EYES);
-    DrawDot(rgb, 41, 28, 5, EYES);
-    // White highlight
-    DrawDot(rgb, 20, 26, 1, WHITE);
-    DrawDot(rgb, 39, 26, 1, WHITE);
+    // Big wide eyes — larger radius
+    DrawCuteEye(rgb, EL_X, EY, 6);
+    DrawCuteEye(rgb, ER_X, EY, 6);
 }
 
 void StarEmoji32::DrawEyesLoving(uint8_t* rgb) {
+    // Heart eyes — two little hearts
     // Left heart
-    DrawDot(rgb, 20, 26, 2, HEART);
-    DrawDot(rgb, 24, 26, 2, HEART);
-    for (int x = 18; x <= 26; x++) DrawPixel(rgb, x, 28, HEART);
-    for (int x = 19; x <= 25; x++) DrawPixel(rgb, x, 29, HEART);
-    for (int x = 20; x <= 24; x++) DrawPixel(rgb, x, 30, HEART);
-    for (int x = 21; x <= 23; x++) DrawPixel(rgb, x, 31, HEART);
-    DrawPixel(rgb, 22, 32, HEART);
+    DrawSoftDot(rgb, EL_X - 2.5f, 26, 2.5f, HEART);
+    DrawSoftDot(rgb, EL_X + 2.5f, 26, 2.5f, HEART);
+    for (int x = EL_X - 5; x <= EL_X + 5; x++) {
+        DrawPixel(rgb, x, 28, HEART);
+        DrawPixel(rgb, x, 29, HEART);
+    }
+    for (int x = EL_X - 4; x <= EL_X + 4; x++) DrawPixel(rgb, x, 30, HEART);
+    for (int x = EL_X - 3; x <= EL_X + 3; x++) DrawPixel(rgb, x, 31, HEART);
+    for (int x = EL_X - 2; x <= EL_X + 2; x++) DrawPixel(rgb, x, 32, HEART);
+    for (int x = EL_X - 1; x <= EL_X + 1; x++) DrawPixel(rgb, x, 33, HEART);
+    DrawPixel(rgb, EL_X, 34, HEART);
+    // Shine on left heart
+    DrawPixel(rgb, EL_X - 2, 25, EYE_SHINE);
+
     // Right heart
-    DrawDot(rgb, 39, 26, 2, HEART);
-    DrawDot(rgb, 43, 26, 2, HEART);
-    for (int x = 37; x <= 45; x++) DrawPixel(rgb, x, 28, HEART);
-    for (int x = 38; x <= 44; x++) DrawPixel(rgb, x, 29, HEART);
-    for (int x = 39; x <= 43; x++) DrawPixel(rgb, x, 30, HEART);
-    for (int x = 40; x <= 42; x++) DrawPixel(rgb, x, 31, HEART);
-    DrawPixel(rgb, 41, 32, HEART);
+    DrawSoftDot(rgb, ER_X - 2.5f, 26, 2.5f, HEART);
+    DrawSoftDot(rgb, ER_X + 2.5f, 26, 2.5f, HEART);
+    for (int x = ER_X - 5; x <= ER_X + 5; x++) {
+        DrawPixel(rgb, x, 28, HEART);
+        DrawPixel(rgb, x, 29, HEART);
+    }
+    for (int x = ER_X - 4; x <= ER_X + 4; x++) DrawPixel(rgb, x, 30, HEART);
+    for (int x = ER_X - 3; x <= ER_X + 3; x++) DrawPixel(rgb, x, 31, HEART);
+    for (int x = ER_X - 2; x <= ER_X + 2; x++) DrawPixel(rgb, x, 32, HEART);
+    for (int x = ER_X - 1; x <= ER_X + 1; x++) DrawPixel(rgb, x, 33, HEART);
+    DrawPixel(rgb, ER_X, 34, HEART);
+    DrawPixel(rgb, ER_X - 2, 25, EYE_SHINE);
 }
 
 void StarEmoji32::DrawEyesCool(uint8_t* rgb) {
-    // Sunglasses - thicker for 64x64
-    for (int y = 26; y <= 32; y++) {
-        for (int x = 15; x <= 27; x++) DrawPixel(rgb, x, y, SUNGLASSES);
-        for (int x = 36; x <= 48; x++) DrawPixel(rgb, x, y, SUNGLASSES);
-    }
+    // Sleek sunglasses with lens reflection
+    // Left lens
+    for (int y = 26; y <= 33; y++)
+        for (int x = 14; x <= 28; x++)
+            DrawPixel(rgb, x, y, SUNGLASSES);
+    // Right lens
+    for (int y = 26; y <= 33; y++)
+        for (int x = 35; x <= 49; x++)
+            DrawPixel(rgb, x, y, SUNGLASSES);
     // Bridge
-    for (int y = 28; y <= 30; y++)
-        DrawLine(rgb, 28, y, 35, y, SUNGLASSES);
+    for (int y = 28; y <= 31; y++)
+        DrawLine(rgb, 29, y, 34, y, SUNGLASSES);
+    // Lens reflections (subtle highlight stripe)
+    DrawLine(rgb, 16, 27, 20, 27, SG_LENS);
+    DrawLine(rgb, 37, 27, 41, 27, SG_LENS);
 }
 
 void StarEmoji32::DrawEyesSleepy(uint8_t* rgb) {
-    DrawLine(rgb, 17, 28, 27, 28, EYES);
-    DrawLine(rgb, 17, 29, 27, 29, EYES);
-    DrawLine(rgb, 36, 28, 46, 28, EYES);
-    DrawLine(rgb, 36, 29, 46, 29, EYES);
+    // Gently closed — soft curved lines
+    DrawThickArc(rgb, EL_X, EY, 5.0f, 2.0f, 10, 170, MOUTH);
+    DrawThickArc(rgb, ER_X, EY, 5.0f, 2.0f, 10, 170, MOUTH);
 }
 
 void StarEmoji32::DrawEyesWinking(uint8_t* rgb) {
-    DrawDot(rgb, 22, 28, 3, EYES);
-    DrawLine(rgb, 36, 28, 46, 28, EYES);
-    DrawLine(rgb, 36, 29, 46, 29, EYES);
+    // Left eye open, right eye closed wink
+    DrawCuteEye(rgb, EL_X, EY, 4);
+    DrawClosedEye(rgb, ER_X, EY);
 }
 
 void StarEmoji32::DrawEyesThinking(uint8_t* rgb) {
-    DrawDot(rgb, 22, 28, 3, EYES);
-    DrawDot(rgb, 41, 26, 3, EYES);  // Looking up
-    // Raised eyebrow
-    DrawArc(rgb, 41, 20, 6, 200, 340, EYES);
-    DrawArc(rgb, 41, 21, 6, 200, 340, EYES);
+    DrawCuteEye(rgb, EL_X, EY, 4);
+    DrawCuteEye(rgb, ER_X, EY - 2, 4, true);  // Looking up
+    // Raised eyebrow on right
+    DrawThickArc(rgb, ER_X, EY - 10, 7.0f, 1.5f, 200, 340, MOUTH);
 }
 
 void StarEmoji32::DrawEyesCrying(uint8_t* rgb) {
-    DrawDot(rgb, 22, 28, 3, EYES);
-    DrawDot(rgb, 41, 28, 3, EYES);
-    // Tears streaming down
-    for (int y = 32; y <= 40; y++) {
-        DrawPixel(rgb, 22, y, TEAR);
-        DrawPixel(rgb, 23, y, TEAR);
-        DrawPixel(rgb, 41, y, TEAR);
-        DrawPixel(rgb, 42, y, TEAR);
-    }
+    DrawCuteEye(rgb, EL_X, EY, 4);
+    DrawCuteEye(rgb, ER_X, EY, 4);
     // Sad eyebrows
-    DrawLine(rgb, 17, 23, 27, 21, EYES);
-    DrawLine(rgb, 36, 21, 46, 23, EYES);
+    DrawThickArc(rgb, EL_X, EY - 6, 8.0f, 1.5f, 340, 380, MOUTH);
+    DrawThickArc(rgb, ER_X, EY - 6, 8.0f, 1.5f, 160, 200, MOUTH);
+    // Tear streams — tapered drops
+    for (int t = 0; t < 10; t++) {
+        float ty = EY + 5.0f + t;
+        float tw = 1.5f - t * 0.1f;
+        if (tw < 0.5f) tw = 0.5f;
+        DrawSoftDot(rgb, EL_X + 2.0f, ty, tw, TEAR);
+        DrawSoftDot(rgb, ER_X - 2.0f, ty, tw, TEAR);
+    }
 }
 
 // ============================================================================
-// MOUTH EXPRESSIONS — scaled to 64x64
+// MOUTH EXPRESSIONS — warmer, rounder
 // ============================================================================
 
 void StarEmoji32::DrawMouthNeutral(uint8_t* rgb) {
-    DrawLine(rgb, 26, 43, 37, 43, MOUTH);
-    DrawLine(rgb, 26, 44, 37, 44, MOUTH);
+    // Gentle short line
+    DrawThickArc(rgb, 31, 43, 0.1f, 2.0f, 0, 180, MOUTH);
+    DrawLine(rgb, 27, 43, 36, 43, MOUTH);
+    DrawLine(rgb, 27, 44, 36, 44, MOUTH);
 }
 
 void StarEmoji32::DrawMouthSmile(uint8_t* rgb) {
-    DrawArc(rgb, 31, 39, 8, 20, 160, MOUTH);
-    DrawArc(rgb, 31, 39, 7, 20, 160, MOUTH);
+    // Soft smile curve
+    DrawThickArc(rgb, 31, 39, 8.0f, 2.2f, 15, 165, MOUTH);
 }
 
 void StarEmoji32::DrawMouthSad(uint8_t* rgb) {
-    DrawArc(rgb, 31, 47, 7, 200, 340, MOUTH);
-    DrawArc(rgb, 31, 47, 6, 200, 340, MOUTH);
+    // Downturned curve
+    DrawThickArc(rgb, 31, 48, 7.0f, 2.0f, 200, 340, MOUTH);
 }
 
 void StarEmoji32::DrawMouthOpen(uint8_t* rgb) {
-    DrawDot(rgb, 31, 43, 4, MOUTH);
-    DrawDot(rgb, 31, 43, 2, INNER_MOUTH);
+    // Round open mouth — "O" shape
+    DrawSoftDot(rgb, 31, 43, 5.0f, MOUTH);
+    DrawSoftDot(rgb, 31, 43, 3.0f, INNER_MOUTH);
 }
 
 void StarEmoji32::DrawMouthGrin(uint8_t* rgb) {
-    DrawArc(rgb, 31, 39, 10, 10, 170, MOUTH);
-    DrawArc(rgb, 31, 39, 9, 10, 170, MOUTH);
+    // Wide grin with dark interior
+    DrawThickArc(rgb, 31, 38, 10.0f, 2.2f, 10, 170, MOUTH);
     DrawLine(rgb, 21, 39, 41, 39, MOUTH);
-    for (int x = 24; x <= 38; x++) {
-        DrawPixel(rgb, x, 40, INNER_MOUTH);
-        DrawPixel(rgb, x, 41, INNER_MOUTH);
+    // Dark interior fill
+    for (int y = 40; y <= 44; y++) {
+        int hw = 9 - (y - 40) * 2;
+        if (hw < 1) hw = 1;
+        for (int x = 31 - hw; x <= 31 + hw; x++)
+            DrawPixel(rgb, x, y, INNER_MOUTH);
     }
 }
 
 void StarEmoji32::DrawMouthKiss(uint8_t* rgb) {
-    DrawDot(rgb, 31, 43, 3, TONGUE);
-    DrawDot(rgb, 31, 43, 1, INNER_MOUTH);
+    // Small puckered lips
+    DrawSoftDot(rgb, 31, 43, 3.5f, TONGUE);
+    DrawSoftDot(rgb, 31, 43, 1.8f, INNER_MOUTH);
+    // Shine on lips
+    DrawPixel(rgb, 30, 42, EYE_SHINE);
 }
 
 void StarEmoji32::DrawMouthTongue(uint8_t* rgb) {
-    DrawArc(rgb, 31, 39, 8, 20, 160, MOUTH);
-    DrawArc(rgb, 31, 39, 7, 20, 160, MOUTH);
-    // Tongue
-    for (int y = 45; y <= 49; y++) {
-        DrawPixel(rgb, 30, y, TONGUE);
-        DrawPixel(rgb, 31, y, TONGUE);
-        DrawPixel(rgb, 32, y, TONGUE);
-    }
+    // Smile + tongue sticking out
+    DrawThickArc(rgb, 31, 39, 8.0f, 2.2f, 15, 165, MOUTH);
+    // Tongue (rounded)
+    DrawSoftDot(rgb, 31, 47, 3.5f, TONGUE);
+    DrawSoftDot(rgb, 31, 46, 3.0f, TONGUE);
+    // Tongue center line
+    DrawLine(rgb, 31, 44, 31, 49, INNER_MOUTH);
 }
 
 // ============================================================================
-// STAR IMAGE CREATION
+// CREATE STAR IMAGE
 // ============================================================================
 
 StarEmoji32::StarImage* StarEmoji32::CreateStarEmoji(
@@ -383,7 +492,7 @@ StarEmoji32::StarImage* StarEmoji32::CreateStarEmoji(
     uint8_t* alpha_data = img->pixels + RGB_SIZE;
 
     GenerateStarMask(alpha_data);
-    FillStarColor(rgb_data, alpha_data, STAR_BODY, STAR_EDGE);
+    FillStarColor(rgb_data, alpha_data);
 
     if (drawEyes) drawEyes(rgb_data);
     if (drawMouth) drawMouth(rgb_data);
@@ -393,11 +502,11 @@ StarEmoji32::StarImage* StarEmoji32::CreateStarEmoji(
 }
 
 // ============================================================================
-// CONSTRUCTOR
+// CONSTRUCTOR — build all 21 emotion variants
 // ============================================================================
 
 StarEmoji32::StarEmoji32() {
-    ESP_LOGI(TAG, "Creating star emoji collection (%dx%d)", SIZE, SIZE);
+    ESP_LOGI(TAG, "Creating glossy star emoji collection (%dx%d)", SIZE, SIZE);
 
     struct EmotionDef {
         const char* name;
@@ -433,8 +542,9 @@ StarEmoji32::StarEmoji32() {
         StarImage* img = CreateStarEmoji(emo.eyes, emo.mouth);
         if (img) {
             if (strcmp(emo.name, "embarrassed") == 0) {
-                DrawDot(img->pixels, 16, 38, 4, BLUSH);
-                DrawDot(img->pixels, 47, 38, 4, BLUSH);
+                // Soft blush circles on cheeks
+                DrawSoftDot(img->pixels, 15.0f, 38.0f, 4.5f, BLUSH);
+                DrawSoftDot(img->pixels, 48.0f, 38.0f, 4.5f, BLUSH);
             }
             AddEmoji(emo.name, new LvglAllocatedImage(
                 img->pixels, TOTAL_SIZE, SIZE, SIZE, STRIDE,
@@ -443,7 +553,7 @@ StarEmoji32::StarEmoji32() {
         }
     }
 
-    ESP_LOGI(TAG, "Star emoji collection ready (%d emotions)", image_count_);
+    ESP_LOGI(TAG, "Glossy star emoji collection ready (%d emotions)", image_count_);
 }
 
 StarEmoji32::~StarEmoji32() {

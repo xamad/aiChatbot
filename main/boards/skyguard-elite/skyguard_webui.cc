@@ -1,5 +1,6 @@
 #include "skyguard_webui.h"
 #include "settings.h"
+#include "application.h"
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <cJSON.h>
@@ -60,14 +61,24 @@ input:focus{border-color:#55aaff;outline:none}
 .flight{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0d1117;font-size:.8em}
 .sat{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0d1117;font-size:.8em}
 footer{text-align:center;color:#30363d;font-size:.65em;padding:12px}
+.cbtn{padding:8px 12px;background:#1a2332;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:.78em;cursor:pointer;text-align:left;flex:1 1 calc(50% - 4px);min-width:120px}
+.cbtn:hover{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.cbtn:active{background:#238636;border-color:#238636}
+.cbtn.sending{opacity:.5;pointer-events:none}
+.acc-hdr{cursor:pointer;user-select:none}
+.acc-hdr::after{content:' +';color:#55aaff;font-weight:bold}
+.acc-hdr.open::after{content:' -'}
+.rbtn{padding:4px 8px;background:#0d1117;border:1px solid #21262d;border-radius:4px;color:#8b949e;font-size:.72em;cursor:pointer}
+.rbtn:hover{background:#1a2332;color:#c9d1d9}
 </style>
 </head>
 <body>
 <div class="hdr"><h1>SkyGuard AI</h1><p>Astronomy Copilot Dashboard</p></div>
 <div class="tabs">
 <div class="tab active" onclick="showTab(0)">Display</div>
-<div class="tab" onclick="showTab(1)">Config</div>
-<div class="tab" onclick="showTab(2)">Info</div>
+<div class="tab" onclick="showTab(1)">Comandi AI</div>
+<div class="tab" onclick="showTab(2)">Config</div>
+<div class="tab" onclick="showTab(3)">Info</div>
 </div>
 
 <!-- TAB 0: DISPLAY MIRROR -->
@@ -193,8 +204,120 @@ footer{text-align:center;color:#30363d;font-size:.65em;padding:12px}
 
 </div>
 
-<!-- TAB 1: CONFIGURATION -->
+<!-- TAB 1: COMANDI AI -->
 <div class="panel" id="p1">
+<div id="cmdStatus" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:.8em">
+<span id="cmdDot" style="width:8px;height:8px;border-radius:50%;background:#ffbb00"></span>
+<span id="cmdState">Pronto</span>
+</div>
+
+<div id="cmdResponse" class="card" style="display:none">
+<h3><span class="dot" style="background:#55aaff"></span>Risposta AI</h3>
+<div id="cmdRespText" style="font-size:.82em;white-space:pre-wrap;max-height:200px;overflow-y:auto"></div>
+</div>
+
+<div id="cmdRecent" class="card" style="display:none">
+<h3>Recenti</h3>
+<div id="cmdRecentList" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+</div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Osservazione</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Analizza le condizioni del cielo stasera')">Condizioni cielo</button>
+<button class="cbtn" onclick="sendCmd('Qual e il seeing stimato?')">Seeing stimato</button>
+<button class="cbtn" onclick="sendCmd('Quando inizia il buio astronomico?')">Buio astronomico</button>
+<button class="cbtn" onclick="sendCmd('Quanto dura la finestra osservativa stasera?')">Finestra osservativa</button>
+<button class="cbtn" onclick="sendCmd('La Luna disturba stasera?')">Disturbo Luna</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Oggetti Deep Sky</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Suggerisci 5 oggetti deep sky visibili adesso')">Suggerisci 5 oggetti</button>
+<button class="cbtn" onclick="sendCmd('Quali nebulose sono alte sopra i 40 gradi?')">Nebulose alte</button>
+<button class="cbtn" onclick="sendCmd('Galassie facili per stasera')">Galassie facili</button>
+<button class="cbtn" onclick="sendCmd('Oggetti Messier al meridiano')">Messier al meridiano</button>
+<button class="cbtn" onclick="sendCmd('Oggetti per camera widefield')">Per widefield</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Pianificazione Imaging</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Pianifica sessione di imaging per stasera')">Pianifica sessione</button>
+<button class="cbtn" onclick="sendCmd('Quanto tempo di esposizione serve per M42?')">Esposizione M42</button>
+<button class="cbtn" onclick="sendCmd('Suggerisci filtri per questo livello di LP')">Filtri per LP</button>
+<button class="cbtn" onclick="sendCmd('Calcola il campo inquadrato del mio setup')">Campo inquadrato</button>
+<button class="cbtn" onclick="sendCmd('Crea un mosaico per la Nebulosa Velo')">Mosaico Velo</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Pianeti e Luna</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Quali pianeti sono visibili stasera?')">Pianeti visibili</button>
+<button class="cbtn" onclick="sendCmd('Quando sorge Giove?')">Sorgere Giove</button>
+<button class="cbtn" onclick="sendCmd('Quando sorge Saturno?')">Sorgere Saturno</button>
+<button class="cbtn" onclick="sendCmd('Fase lunare dettagliata')">Fase lunare</button>
+<button class="cbtn" onclick="sendCmd('Prossima congiunzione planetaria')">Congiunzione</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Meteo e Nubi</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Previsioni meteo per stasera')">Meteo stasera</button>
+<button class="cbtn" onclick="sendCmd('Quando si aprono le nubi?')">Apertura nubi</button>
+<button class="cbtn" onclick="sendCmd('Rischio rugiada sulle ottiche?')">Rischio rugiada</button>
+<button class="cbtn" onclick="sendCmd('Vento e turbolenza previsti')">Vento e turbolenza</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Telescopio</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Stato del telescopio')">Stato telescopio</button>
+<button class="cbtn" onclick="sendCmd('Punta il telescopio su M31')">Punta M31</button>
+<button class="cbtn" onclick="sendCmd('Punta il telescopio su M42')">Punta M42</button>
+<button class="cbtn" onclick="sendCmd('Centra il telescopio sullo zenith')">Vai allo zenith</button>
+<button class="cbtn" onclick="sendCmd('Parcheggia il telescopio')">Parcheggia</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Sensori e Misure</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Misura SQM adesso')">Misura SQM</button>
+<button class="cbtn" onclick="sendCmd('Analisi spettrale del cielo')">Analisi spettrale</button>
+<button class="cbtn" onclick="sendCmd('Report completo sensori')">Report sensori</button>
+<button class="cbtn" onclick="sendCmd('Storico misurazioni SQM di stasera')">Storico SQM</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Educazione</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Cosa significa Bortle 5?')">Scala Bortle</button>
+<button class="cbtn" onclick="sendCmd('Come si legge il valore MPSAS?')">Guida MPSAS</button>
+<button class="cbtn" onclick="sendCmd('Cos e il seeing astronomico?')">Cos e il seeing</button>
+<button class="cbtn" onclick="sendCmd('Come ridurre l inquinamento luminoso nelle foto?')">Ridurre LP</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Aerei e Satelliti</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Aerei sopra di me adesso')">Aerei sopra</button>
+<button class="cbtn" onclick="sendCmd('Prossimo passaggio ISS')">Passaggio ISS</button>
+<button class="cbtn" onclick="sendCmd('Satelliti visibili stasera')">Satelliti visibili</button>
+<button class="cbtn" onclick="sendCmd('C e rischio di scie nelle foto?')">Rischio scie</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Setup e Equipment</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Analizza il mio setup per stasera')">Analizza setup</button>
+<button class="cbtn" onclick="sendCmd('Quale setup e migliore per nebulose?')">Setup nebulose</button>
+<button class="cbtn" onclick="sendCmd('Limite di vento per la mia montatura')">Limite vento</button>
+<button class="cbtn" onclick="sendCmd('Risoluzione e campionamento del mio setup')">Campionamento</button>
+</div></div>
+
+<div class="card"><h3 class="acc-hdr" onclick="toggleAcc(this)">Comandi Rapidi</h3>
+<div class="acc-body" style="display:none;flex-wrap:wrap;gap:4px">
+<button class="cbtn" onclick="sendCmd('Buonasera Sophia, come va stasera?')">Saluta Sophia</button>
+<button class="cbtn" onclick="sendCmd('Riassumi la situazione')">Riassunto</button>
+<button class="cbtn" onclick="sendCmd('Cosa mi consigli di fare adesso?')">Consiglio</button>
+<button class="cbtn" onclick="sendCmd('Grazie Sophia, buonanotte')">Buonanotte</button>
+</div></div>
+
+</div>
+
+<!-- TAB 2: CONFIGURATION -->
+<div class="panel" id="p2">
 <div id="cfgMsg" class="msg"></div>
 
 <div class="card"><h3>API Keys</h3>
@@ -265,8 +388,8 @@ footer{text-align:center;color:#30363d;font-size:.65em;padding:12px}
 <button class="btn" onclick="saveConfig()">Salva Configurazione</button>
 </div>
 
-<!-- TAB 2: INFO -->
-<div class="panel" id="p2">
+<!-- TAB 3: INFO -->
+<div class="panel" id="p3">
 <div class="card"><h3>Dispositivo</h3>
 <div class="row"><span class="k">Modello</span><span class="v">SkyGuard AI</span></div>
 <div class="row"><span class="k">Firmware</span><span class="v">v2.1.0</span></div>
@@ -608,7 +731,40 @@ try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'ap
 if(r.ok)showMsg('Configurazione salvata!',true);else showMsg('Errore',false);
 }catch(e){showMsg('Errore di connessione',false)}}
 
-loadStatus();loadConfig();renderCat();
+// Comandi AI
+function toggleAcc(el){const body=el.nextElementSibling;
+const open=body.style.display==='flex';
+body.style.display=open?'none':'flex';
+el.classList.toggle('open',!open)}
+
+let cmdRecents=JSON.parse(localStorage.getItem('sg_cmd_recent')||'[]');
+function renderRecents(){const el=document.getElementById('cmdRecentList');
+const wrap=document.getElementById('cmdRecent');
+if(!cmdRecents.length){wrap.style.display='none';return}
+wrap.style.display='block';
+el.innerHTML=cmdRecents.slice(0,8).map(c=>'<button class="rbtn" onclick="sendCmd(\''+c.replace(/'/g,"\\'")+'\')">'+c.substring(0,30)+(c.length>30?'...':'')+'</button>').join('')}
+
+async function sendCmd(text){
+const dot=document.getElementById('cmdDot');
+const state=document.getElementById('cmdState');
+const resp=document.getElementById('cmdResponse');
+const respText=document.getElementById('cmdRespText');
+dot.style.background='#ffbb00';state.textContent='Invio...';
+try{
+const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})});
+const d=await r.json();
+if(d.ok){dot.style.background='#00dd66';state.textContent='Inviato: '+text.substring(0,40);
+resp.style.display='block';respText.textContent='Comando inviato a Sophia. La risposta arrivera via voce dal dispositivo.';
+// Save to recents
+cmdRecents=cmdRecents.filter(c=>c!==text);cmdRecents.unshift(text);
+if(cmdRecents.length>8)cmdRecents.pop();
+localStorage.setItem('sg_cmd_recent',JSON.stringify(cmdRecents));renderRecents();
+setTimeout(()=>{dot.style.background='#00dd66';state.textContent='Pronto'},5000)}
+else{dot.style.background='#ff3333';state.textContent='Errore';resp.style.display='block';respText.textContent='Errore invio comando'}
+}catch(e){dot.style.background='#ff3333';state.textContent='Errore connessione';
+resp.style.display='block';respText.textContent='Impossibile contattare il dispositivo'}}
+
+loadStatus();loadConfig();renderCat();renderRecents();
 setInterval(loadStatus,3000);
 </script>
 </body>
@@ -841,6 +997,44 @@ esp_err_t SkyGuardWebUI::HandlePostConfig(httpd_req_t* req) {
     return httpd_resp_send(req, "{\"ok\":true}", 11);
 }
 
+esp_err_t SkyGuardWebUI::HandlePostCommand(httpd_req_t* req) {
+    size_t content_len = req->content_len;
+    if (content_len == 0 || content_len > 1024) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid length");
+        return ESP_FAIL;
+    }
+
+    char buf[1025];
+    int received = httpd_req_recv(req, buf, content_len);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Recv failed");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON* root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON* text_item = cJSON_GetObjectItem(root, "text");
+    if (!text_item || !cJSON_IsString(text_item) || !text_item->valuestring[0]) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing text");
+        return ESP_FAIL;
+    }
+
+    std::string text = text_item->valuestring;
+    cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "AI command from WebUI: %s", text.c_str());
+    Application::GetInstance().SendChatMessage(text);
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"ok\":true}", 11);
+}
+
 // =========================================================================
 // Server lifecycle
 // =========================================================================
@@ -856,7 +1050,7 @@ void SkyGuardWebUI::Start() {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 10;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.lru_purge_enable = true;
     config.stack_size = 8192;
@@ -873,10 +1067,13 @@ void SkyGuardWebUI::Start() {
     httpd_uri_t get_config = { .uri = "/api/config", .method = HTTP_GET, .handler = HandleGetConfig, .user_ctx = this };
     httpd_uri_t post_config = { .uri = "/api/config", .method = HTTP_POST, .handler = HandlePostConfig, .user_ctx = this };
 
+    httpd_uri_t post_cmd = { .uri = "/api/command", .method = HTTP_POST, .handler = HandlePostCommand, .user_ctx = this };
+
     httpd_register_uri_handler(server_, &root_uri);
     httpd_register_uri_handler(server_, &status_uri);
     httpd_register_uri_handler(server_, &get_config);
     httpd_register_uri_handler(server_, &post_config);
+    httpd_register_uri_handler(server_, &post_cmd);
 
     ESP_LOGI(TAG, "WebUI started");
 }

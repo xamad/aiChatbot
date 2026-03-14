@@ -48,6 +48,7 @@ private:
     static esp_err_t HandleGetStatus(httpd_req_t* req);
     static esp_err_t HandleGetConfig(httpd_req_t* req);
     static esp_err_t HandlePostConfig(httpd_req_t* req);
+    static esp_err_t HandlePostCommand(httpd_req_t* req);
 };
 
 #endif // SKYGUARD_WEBUI_H

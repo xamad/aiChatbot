@@ -106,6 +106,7 @@ private:
     bool touch_was_down_ = false;
     uint32_t touch_down_tick_ = 0;     // Tick when touch first detected
     uint16_t touch_start_y_ = 0;       // Y coordinate at touch start (for swipe detection)
+    bool pending_ai_exit_ = false;     // Flag: abort speaking done, waiting for listening state to call StopListening
 
     // Centralized resolved position — ONE source of truth
     // Priority: GPS module → Google WiFi API → NVS fallback (from WebUI config)
@@ -115,6 +116,31 @@ private:
     int pos_gps_sats_ = 0;
     float pos_gps_hdop_ = 99.9f;
     const char* pos_source_ = "nvs";  // "gps", "wifi_google", "nvs"
+
+    // Properly exit chatbot session: handles speaking, listening, and connecting states
+    void ExitChatbot() {
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateSpeaking) {
+            // Abort speaking first → will transition to listening
+            // Then pending_ai_exit_ flag will trigger StopListening on next tick
+            app.ToggleChatState();
+            pending_ai_exit_ = true;
+            ESP_LOGI(TAG, "ExitChatbot: aborting speech, will stop listening on next tick");
+        } else if (state == kDeviceStateListening) {
+            // Directly stop listening → transitions to idle
+            app.StopListening();
+            pending_ai_exit_ = false;
+            ESP_LOGI(TAG, "ExitChatbot: StopListening → idle");
+        } else if (state == kDeviceStateConnecting) {
+            // Force close during connection attempt
+            app.ToggleChatState();
+            pending_ai_exit_ = false;
+            ESP_LOGI(TAG, "ExitChatbot: aborting connection");
+        }
+        ai_idle_counter_ = 0;
+        ai_was_active_ = false;
+    }
 
     void UpdatePosition() {
         // 1. GPS module (highest priority)
@@ -739,10 +765,8 @@ private:
             if (state == kDeviceStateListening ||
                 state == kDeviceStateSpeaking ||
                 state == kDeviceStateConnecting) {
-                ESP_LOGI(TAG, "BOOT press → exiting chatbot (was active)");
-                app.ToggleChatState();
-                ai_idle_counter_ = 0;
-                ai_was_active_ = false;
+                ESP_LOGI(TAG, "BOOT press → exiting chatbot");
+                ExitChatbot();
             } else {
                 ESP_LOGI(TAG, "BOOT press → starting chatbot");
                 app.ToggleChatState();
@@ -2084,6 +2108,7 @@ private:
     std::string indi_url_;
     std::string google_api_key_;
     bool geocode_done_ = false;
+    bool equipment_synced_ = false;  // True after boot POST to server
 
     void CheckAlerts() {
         uint32_t now = tick_counter_;
@@ -2204,6 +2229,12 @@ private:
     static void OnConfigSaved(void* ctx) {
         auto* board = (SkyGuardEliteBoard*)ctx;
         board->ReloadConfigFromNvs();
+        // Sync equipment to server in background task
+        xTaskCreate([](void* arg) {
+            auto* b = (SkyGuardEliteBoard*)arg;
+            b->PostEquipmentToServer();
+            vTaskDelete(nullptr);
+        }, "sg_eq_sync", 6144, board, 2, nullptr);
     }
 
     void ReloadConfigFromNvs() {
@@ -2522,6 +2553,12 @@ private:
     void PostReadingToServer() {
         if (sqm_server_url_.empty()) return;
 
+        // Skip posting when MPSAS is out of valid range (daytime/indoor)
+        if (tsl2591_ && tsl2591_->GetMpsas() < 10.0f) {
+            ESP_LOGI(TAG, "SQM POST skipped: mpsas=%.2f < 10 (daytime/indoor)", tsl2591_->GetMpsas());
+            return;
+        }
+
         // Check privacy flag
         Settings sg_priv("skyguard", false);
         bool privacy_enabled = (sg_priv.GetString("sqm_privacy", "0") == "1");
@@ -2781,6 +2818,9 @@ private:
         cJSON* metrics = cJSON_AddObjectToObject(root, "metrics");
         cJSON_AddNumberToObject(metrics, "stability", tsl2591_ ? (tsl2591_->GetConfidence() / 100.0f) : 0);
 
+        // Equipment is synced separately via POST /api/my/equipment
+        // (at boot and on config save — not on every reading)
+
         // Serialize
         char* json = cJSON_PrintUnformatted(root);
         cJSON_Delete(root);
@@ -2814,6 +2854,51 @@ private:
             // Failed — cache the reading for later (takes ownership of json)
             CacheReading(json);
         }
+    }
+
+    // POST equipment to server — called at boot + when user saves config
+    void PostEquipmentToServer() {
+        if (sqm_server_url_.empty()) return;
+
+        Settings sg("skyguard", false);
+        std::string eq_json = sg.GetString("equipment", "");
+        if (eq_json.empty()) {
+            ESP_LOGI(TAG, "Equipment POST skipped: no equipment in NVS");
+            return;
+        }
+
+        // Build wrapper: {"equipment": {...}}
+        cJSON* wrapper = cJSON_CreateObject();
+        if (!wrapper) return;
+        cJSON* eq = cJSON_Parse(eq_json.c_str());
+        if (eq) {
+            cJSON_AddItemToObject(wrapper, "equipment", eq);
+        } else {
+            cJSON_Delete(wrapper);
+            ESP_LOGW(TAG, "Equipment JSON parse failed");
+            return;
+        }
+
+        char* json = cJSON_PrintUnformatted(wrapper);
+        cJSON_Delete(wrapper);
+        if (!json) return;
+
+        char url[128];
+        snprintf(url, sizeof(url), "%s/api/my/equipment", sqm_server_url_.c_str());
+
+        char* resp = SkyGuardHttp::AllocBuffer(512);
+        if (resp) {
+            bool ok = SkyGuardHttp::Post(url, json, resp, 512, 15000,
+                                          sqm_api_key_.empty() ? nullptr : sqm_api_key_.c_str());
+            if (ok) {
+                ESP_LOGI(TAG, "Equipment synced to server OK");
+                equipment_synced_ = true;
+            } else {
+                ESP_LOGW(TAG, "Equipment POST failed: %s", resp);
+            }
+            free(resp);
+        }
+        cJSON_free(json);
     }
 
     void InitializeSkyGuardDisplay() {
@@ -3013,26 +3098,26 @@ private:
                             lv_obj_add_event_cb(scr, [](lv_event_t* e) {
                                 lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
                                 if (dir != LV_DIR_BOTTOM) return;
-                                auto& app = Application::GetInstance();
-                                auto state = app.GetDeviceState();
+                                auto* b = (SkyGuardEliteBoard*)lv_event_get_user_data(e);
+                                auto state = Application::GetInstance().GetDeviceState();
                                 if (state == kDeviceStateListening ||
                                     state == kDeviceStateSpeaking ||
                                     state == kDeviceStateConnecting) {
                                     ESP_LOGI("SkyGuardUI", "Swipe-down → exiting chatbot");
-                                    app.ToggleChatState();
+                                    b->ExitChatbot();
                                 }
-                            }, LV_EVENT_GESTURE, nullptr);
+                            }, LV_EVENT_GESTURE, board);
                             // Single tap exit (tap anywhere on emoji screen)
                             lv_obj_add_event_cb(scr, [](lv_event_t* e) {
-                                auto& app = Application::GetInstance();
-                                auto state = app.GetDeviceState();
+                                auto* b = (SkyGuardEliteBoard*)lv_event_get_user_data(e);
+                                auto state = Application::GetInstance().GetDeviceState();
                                 if (state == kDeviceStateListening ||
                                     state == kDeviceStateSpeaking ||
                                     state == kDeviceStateConnecting) {
                                     ESP_LOGI("SkyGuardUI", "Screen tap → exiting chatbot");
-                                    app.ToggleChatState();
+                                    b->ExitChatbot();
                                 }
-                            }, LV_EVENT_CLICKED, nullptr);
+                            }, LV_EVENT_CLICKED, board);
                         }
                         lvgl_port_unlock();
                     }
@@ -3048,6 +3133,15 @@ private:
                 bool ai_active = (state == kDeviceStateListening ||
                                   state == kDeviceStateSpeaking ||
                                   state == kDeviceStateConnecting);
+
+                // Pending exit: speaking was aborted, now check if state became listening
+                if (board->pending_ai_exit_ && state == kDeviceStateListening) {
+                    ESP_LOGI(TAG, "Pending exit: speaking→listening transition, calling StopListening");
+                    Application::GetInstance().StopListening();
+                    board->pending_ai_exit_ = false;
+                    board->ai_idle_counter_ = 0;
+                    board->ai_was_active_ = false;
+                }
 
                 // Direct touch polling for AI exit — bypasses LVGL event system
                 // which may not deliver events when emoji overlay is active
@@ -3072,9 +3166,7 @@ private:
                         ESP_LOGI(TAG, "Touch up during AI: hold=%lds start_y=%d", (long)hold_ticks, board->touch_start_y_);
                         if (hold_ticks <= 2) {  // Tap (held < 2 seconds)
                             ESP_LOGI(TAG, "Touch TAP → exiting chatbot");
-                            Application::GetInstance().ToggleChatState();
-                            board->ai_idle_counter_ = 0;
-                            board->ai_was_active_ = false;
+                            board->ExitChatbot();
                         }
                     }
                 } else if (!ai_active) {
@@ -3090,18 +3182,14 @@ private:
                         if (board->ai_idle_counter_ >= 5 &&
                             !Application::GetInstance().IsVoiceDetected()) {
                             ESP_LOGI(TAG, "Auto-exit chatbot: 5s no voice in listening");
-                            Application::GetInstance().ToggleChatState();
-                            board->ai_idle_counter_ = 0;
-                            board->ai_was_active_ = false;
+                            board->ExitChatbot();
                         }
                     } else if (state == kDeviceStateConnecting) {
                         // Connecting for too long (no WiFi?) → exit after 10s
                         board->ai_idle_counter_++;
                         if (board->ai_idle_counter_ >= 10) {
                             ESP_LOGI(TAG, "Auto-exit chatbot: 10s stuck in connecting");
-                            Application::GetInstance().ToggleChatState();
-                            board->ai_idle_counter_ = 0;
-                            board->ai_was_active_ = false;
+                            board->ExitChatbot();
                         }
                     } else {
                         board->ai_idle_counter_ = 0;  // Reset counter while speaking
@@ -3184,6 +3272,18 @@ private:
                     auto& wifi = WifiManager::GetInstance();
                     if (!wifi.IsConfigMode() && !wifi.GetIpAddress().empty()) {
                         board->webui_->Start();
+                    }
+                }
+
+                // Sync equipment to server at boot (one-shot, after WiFi)
+                if (!board->equipment_synced_ && board->tick_counter_ == 12) {
+                    auto& wifi = WifiManager::GetInstance();
+                    if (!wifi.IsConfigMode() && !wifi.GetIpAddress().empty()) {
+                        xTaskCreate([](void* arg) {
+                            auto* b = (SkyGuardEliteBoard*)arg;
+                            b->PostEquipmentToServer();
+                            vTaskDelete(nullptr);
+                        }, "sg_eq_boot", 6144, board, 2, nullptr);
                     }
                 }
 

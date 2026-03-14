@@ -45,10 +45,11 @@ enum SkyGuardPage {
     PAGE_METEOSAT,       // Satellite imagery (EUMETSAT/cloud map)
     PAGE_TELESCOPE,      // Telescope mount status (ASCOM Alpaca + INDI)
     PAGE_CONTROL,        // Remote control buttons (telescope, INDI, Stellarium)
+    PAGE_QUICKCMD,       // Quick AI commands (text-to-chat buttons)
     PAGE_ENVIRONMENT,    // Temp/humidity
     PAGE_GPS,            // GPS position
     PAGE_MEASURE,        // Commands (always last)
-    PAGE_COUNT           // = 12
+    PAGE_COUNT           // = 13
 };
 
 class SkyGuardDisplay {
@@ -213,6 +214,7 @@ private:
     lv_obj_t* weather_cloud_val_[6] = {};
     lv_obj_t* weather_wind_[6] = {};
     lv_obj_t* weather_temp_[6] = {};
+    lv_obj_t* weather_rain_[6] = {};          // Rain: "80% 2.1mm" or "--"
     lv_obj_t* weather_hum_[6] = {};           // Humidity %
     lv_obj_t* weather_seeing_[6] = {};        // Seeing estimate
     lv_obj_t* weather_desc_[6] = {};          // Short description text
@@ -222,6 +224,7 @@ private:
     lv_obj_t* weather_daily_day_[5] = {};      // "Gio", "Ven"...
     lv_obj_t* weather_daily_temp_[5] = {};     // "8/22"
     lv_obj_t* weather_daily_cloud_[5] = {};    // "45%"
+    lv_obj_t* weather_daily_rain_[5] = {};     // "80% 5mm" or "--"
     lv_obj_t* weather_daily_icon_[5] = {};     // Mini icon canvas
     uint8_t* weather_daily_icon_bufs_[5] = {};
     lv_obj_t* weather_daily_sep_ = nullptr;    // Separator line
@@ -306,6 +309,16 @@ private:
     int ctrl_btn_count_ = 0;
     bool ctrl_built_ = false;
     void HideControlBtns();
+
+    // Quick Commands page — AI chat buttons
+    static constexpr int QCMD_BTN_MAX = 56;
+    lv_obj_t* qcmd_btns_[QCMD_BTN_MAX] = {};
+    lv_obj_t* qcmd_scroll_container_ = nullptr;
+    int qcmd_btn_count_ = 0;
+    bool qcmd_built_ = false;
+    void BuildPageQuickCmd();
+    void ShowQuickCmdBtns();
+    void HideQuickCmdBtns();
     void ShowControlBtns();
 
     // Confirmation dialog for control buttons

@@ -1127,11 +1127,13 @@ void SkyGuardDisplay::Setup() {
     if (col_start_x < 0) col_start_x = 0;
 
     // ========== HOURLY SECTION (5 columns) ==========
-    // y=10:  time
-    // y=20:  icon (20x20)
-    // y=40:  temperature (SmallFont)
-    // y=56:  clouds% + wind
-    // y=66:  humidity%
+    // y=0:   time
+    // y=9:   icon (20x20)
+    // y=30:  temperature
+    // y=40:  cloud bar
+    // y=43:  clouds%
+    // y=52:  rain (pop% + mm)
+    // y=61:  wind
 
     int icon_buf_size = LV_CANVAS_BUF_SIZE(WICON_MINI, WICON_MINI, 16, LV_DRAW_BUF_STRIDE_ALIGN);
 
@@ -1144,14 +1146,14 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_time_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_time_[i], col_w);
         lv_label_set_text(weather_time_[i], "--:--");
-        lv_obj_set_pos(weather_time_[i], cx, 10);
+        lv_obj_set_pos(weather_time_[i], cx, 0);
 
         weather_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, icon_buf_size, MALLOC_CAP_DEFAULT);
         if (weather_icon_bufs_[i]) {
             weather_icon_canvas_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_icon_canvas_[i], weather_icon_bufs_[i],
                                  WICON_MINI, WICON_MINI, LV_COLOR_FORMAT_RGB565);
-            lv_obj_set_pos(weather_icon_canvas_[i], cx + (col_w - WICON_MINI) / 2, 20);
+            lv_obj_set_pos(weather_icon_canvas_[i], cx + (col_w - WICON_MINI) / 2, 9);
         }
 
         weather_temp_[i] = lv_label_create(weather_container_);
@@ -1160,13 +1162,13 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_temp_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_temp_[i], col_w);
         lv_label_set_text(weather_temp_[i], "--");
-        lv_obj_set_pos(weather_temp_[i], cx, 40);
+        lv_obj_set_pos(weather_temp_[i], cx, 30);
 
-        // Cloud bar (compact: 8px max height)
+        // Cloud bar (compact: 3px)
         weather_cloud_bar_[i] = lv_obj_create(weather_container_);
         lv_obj_remove_style_all(weather_cloud_bar_[i]);
         lv_obj_set_size(weather_cloud_bar_[i], col_w - 8, 3);
-        lv_obj_set_pos(weather_cloud_bar_[i], cx + 4, 57);
+        lv_obj_set_pos(weather_cloud_bar_[i], cx + 4, 40);
         lv_obj_set_style_bg_color(weather_cloud_bar_[i], SG_GOOD_COLOR, 0);
         lv_obj_set_style_bg_opa(weather_cloud_bar_[i], LV_OPA_COVER, 0);
         lv_obj_set_style_radius(weather_cloud_bar_[i], 1, 0);
@@ -1177,7 +1179,16 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_cloud_val_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_cloud_val_[i], col_w);
         lv_label_set_text(weather_cloud_val_[i], "--%");
-        lv_obj_set_pos(weather_cloud_val_[i], cx, 60);
+        lv_obj_set_pos(weather_cloud_val_[i], cx, 43);
+
+        // Rain: probability + mm
+        weather_rain_[i] = lv_label_create(weather_container_);
+        lv_obj_set_style_text_font(weather_rain_[i], GetTinyFont(), 0);
+        lv_obj_set_style_text_color(weather_rain_[i], lv_color_hex(0x55AAFF), 0);
+        lv_obj_set_style_text_align(weather_rain_[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(weather_rain_[i], col_w);
+        lv_label_set_text(weather_rain_[i], "--");
+        lv_obj_set_pos(weather_rain_[i], cx, 52);
 
         weather_wind_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_wind_[i], GetTinyFont(), 0);
@@ -1185,7 +1196,7 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_wind_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_wind_[i], col_w);
         lv_label_set_text(weather_wind_[i], "--");
-        lv_obj_set_pos(weather_wind_[i], cx, 70);
+        lv_obj_set_pos(weather_wind_[i], cx, 61);
 
         // Humidity and seeing hidden (no space — show only in daily)
         weather_hum_[i] = lv_label_create(weather_container_);
@@ -1206,25 +1217,27 @@ void SkyGuardDisplay::Setup() {
     weather_temp_[5] = nullptr;
     weather_cloud_bar_[5] = nullptr;
     weather_cloud_val_[5] = nullptr;
+    weather_rain_[5] = nullptr;
     weather_wind_[5] = nullptr;
     weather_hum_[5] = nullptr;
     weather_seeing_[5] = nullptr;
     weather_desc_[5] = nullptr;
     weather_icon_bufs_[5] = nullptr;
 
-    // ========== SEPARATOR LINE at y=82 ==========
+    // ========== SEPARATOR LINE at y=72 ==========
     weather_daily_sep_ = lv_obj_create(weather_container_);
     lv_obj_remove_style_all(weather_daily_sep_);
     lv_obj_set_size(weather_daily_sep_, content_w - 8, 1);
-    lv_obj_set_pos(weather_daily_sep_, 4, 82);
+    lv_obj_set_pos(weather_daily_sep_, 4, 72);
     lv_obj_set_style_bg_color(weather_daily_sep_, lv_color_hex(0x2A2A44), 0);
     lv_obj_set_style_bg_opa(weather_daily_sep_, LV_OPA_COVER, 0);
 
     // ========== DAILY SECTION (5 columns) ==========
-    // y=85:  day name (Lun, Mar...)
-    // y=95:  icon (20x20)
-    // y=115: min/max temp
-    // y=127: clouds%
+    // y=75:  day name
+    // y=84:  icon (20x20)
+    // y=104: min/max temp
+    // y=116: clouds%
+    // y=125: rain (pop% + mm)
 
     int mini_buf_size = LV_CANVAS_BUF_SIZE(WICON_MINI, WICON_MINI, 16, LV_DRAW_BUF_STRIDE_ALIGN);
 
@@ -1237,14 +1250,14 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_daily_day_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_day_[i], col_w);
         lv_label_set_text(weather_daily_day_[i], "--");
-        lv_obj_set_pos(weather_daily_day_[i], cx, 85);
+        lv_obj_set_pos(weather_daily_day_[i], cx, 75);
 
         weather_daily_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, mini_buf_size, MALLOC_CAP_DEFAULT);
         if (weather_daily_icon_bufs_[i]) {
             weather_daily_icon_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_daily_icon_[i], weather_daily_icon_bufs_[i],
                                  WICON_MINI, WICON_MINI, LV_COLOR_FORMAT_RGB565);
-            lv_obj_set_pos(weather_daily_icon_[i], cx + (col_w - WICON_MINI) / 2, 95);
+            lv_obj_set_pos(weather_daily_icon_[i], cx + (col_w - WICON_MINI) / 2, 84);
         }
 
         weather_daily_temp_[i] = lv_label_create(weather_container_);
@@ -1253,7 +1266,7 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_daily_temp_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_temp_[i], col_w);
         lv_label_set_text(weather_daily_temp_[i], "--");
-        lv_obj_set_pos(weather_daily_temp_[i], cx, 115);
+        lv_obj_set_pos(weather_daily_temp_[i], cx, 104);
 
         weather_daily_cloud_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_daily_cloud_[i], GetTinyFont(), 0);
@@ -1261,7 +1274,16 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_daily_cloud_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_cloud_[i], col_w);
         lv_label_set_text(weather_daily_cloud_[i], "--%");
-        lv_obj_set_pos(weather_daily_cloud_[i], cx, 135);
+        lv_obj_set_pos(weather_daily_cloud_[i], cx, 116);
+
+        // Daily rain: max pop% + total mm
+        weather_daily_rain_[i] = lv_label_create(weather_container_);
+        lv_obj_set_style_text_font(weather_daily_rain_[i], GetTinyFont(), 0);
+        lv_obj_set_style_text_color(weather_daily_rain_[i], lv_color_hex(0x55AAFF), 0);
+        lv_obj_set_style_text_align(weather_daily_rain_[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(weather_daily_rain_[i], col_w);
+        lv_label_set_text(weather_daily_rain_[i], "--");
+        lv_obj_set_pos(weather_daily_rain_[i], cx, 125);
     }
 
     // Astronomy verdict at bottom
@@ -1271,7 +1293,7 @@ void SkyGuardDisplay::Setup() {
     lv_label_set_text(weather_verdict_, "");
     lv_obj_set_width(weather_verdict_, content_w);
     lv_obj_set_style_text_align(weather_verdict_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(weather_verdict_, 0, 148);
+    lv_obj_set_pos(weather_verdict_, 0, 137);
 
     weather_built_ = true;
     HideWeatherBars();
@@ -2185,6 +2207,7 @@ void SkyGuardDisplay::SetPage(SkyGuardPage page) {
         case PAGE_METEOSAT:    BuildPageMeteosat(); break;
         case PAGE_TELESCOPE:   BuildPageTelescope(); break;
         case PAGE_CONTROL:     BuildPageControl(); break;
+        case PAGE_QUICKCMD:    BuildPageQuickCmd(); break;
         case PAGE_ENVIRONMENT: BuildPageEnvironment(); break;
         case PAGE_GPS:         BuildPageGps(); break;
         case PAGE_MEASURE:     BuildPageMeasure(); break;
@@ -2228,6 +2251,7 @@ void SkyGuardDisplay::ClearDataArea() {
     HideGpsCards();
     HideScopeCards();
     HideControlBtns();
+    HideQuickCmdBtns();
     HideCountdown();
 }
 
@@ -2559,6 +2583,181 @@ void SkyGuardDisplay::DismissConfirmDialog() {
     confirm_pending_idx_ = -1;
 }
 
+// ==========================================================================
+// QUICK COMMANDS PAGE — AI chat buttons organized by category
+// ==========================================================================
+
+struct QCmdDef {
+    const char* label;
+    const char* text;     // Text sent via SendChatMessage
+    int group;            // Category index
+};
+
+static const char* kQCmdGroupNames[] = {
+    "CIELO", "AMBIENTE", "PIANIFICAZIONE", "ASTRONOMIA", "METEO",
+    "IMAGING", "STORICO", "MONITORAGGIO", "PLANETARIO", "UTILITY", "PROFILO"
+};
+
+static const lv_color_t kQCmdGroupColors[] = {
+    lv_color_hex(0x112244),  // 0: Cielo — deep blue
+    lv_color_hex(0x113322),  // 1: Ambiente — green
+    lv_color_hex(0x332211),  // 2: Pianificazione — amber
+    lv_color_hex(0x221133),  // 3: Astronomia — purple
+    lv_color_hex(0x112233),  // 4: Meteo — steel blue
+    lv_color_hex(0x331122),  // 5: Imaging — magenta
+    lv_color_hex(0x223311),  // 6: Storico — olive
+    lv_color_hex(0x333311),  // 7: Monitoraggio — yellow-dark
+    lv_color_hex(0x331133),  // 8: Planetario — dark magenta
+    lv_color_hex(0x113333),  // 9: Utility — teal
+    lv_color_hex(0x222233),  // 10: Profilo — slate
+};
+
+static const QCmdDef kQCmdButtons[] = {
+    // 0: CIELO
+    {"Qualita cielo",       "Com'e il cielo stasera?",              0},
+    {"Leggi SQM",           "Leggi il sensore SQM",                 0},
+    {"Analisi spettrale",   "Analisi spettrale inquinamento",       0},
+    {"Safety check",        "Safety check sessione",                0},
+    // 1: AMBIENTE
+    {"Temp e umidita",      "Temperatura e umidita",                1},
+    {"Rischio condensa",    "Rischio condensa e punto rugiada",     1},
+    {"Posizione GPS",       "Posizione GPS attuale",                1},
+    // 2: PIANIFICAZIONE
+    {"Cosa fotografo?",     "Cosa fotografo stasera?",              2},
+    {"Pianifica serata",    "Pianifica la serata di imaging",       2},
+    {"Quanto al buio?",     "Quanto manca al buio astronomico?",    2},
+    {"Timing flat",         "Quando fare i flat frame?",            2},
+    {"Quale setup?",        "Quale setup uso stasera?",             2},
+    // 3: ASTRONOMIA
+    {"Stato luna",          "Stato della luna stasera",             3},
+    {"Satelliti in zona",   "Satelliti visibili in zona",           3},
+    {"Aerei in zona",       "Aerei in zona adesso",                3},
+    {"Cos'e quella luce?",  "Che cos'e quella luce nel cielo?",    3},
+    {"Dove Polaris?",       "Dove metto Polaris nel polare?",      3},
+    // 4: METEO
+    {"Meteo stasera",       "Previsioni meteo per stasera",        4},
+    {"Previsioni seeing",   "Previsioni seeing astronomico",       4},
+    {"Notte migliore?",     "Notte migliore questa settimana",     4},
+    {"Meteo Italia",        "Previsioni meteo Italia",             4},
+    // 5: IMAGING
+    {"Quanti frame?",       "Quanti frame servono per lo stacking?",5},
+    {"Quanti dark?",        "Quanti dark frame devo fare?",        5},
+    {"Come sono i frame?",  "Come sono i frame catturati?",        5},
+    // 6: STORICO
+    {"Ultima settimana",    "Storico ultima settimana",            6},
+    {"Trend LP",            "Trend inquinamento luminoso",         6},
+    {"Stato connessione",   "Stato connessione WiFi e latenza",   6},
+    // 7: MONITORAGGIO
+    {"Attiva allarmi",      "Attiva allarmi proattivi",            7},
+    {"Disattiva allarmi",   "Disattiva allarmi",                   7},
+    {"Attiva monitoring",   "Attiva monitoraggio condizioni",      7},
+    {"Stop monitoring",     "Disattiva monitoraggio condizioni",   7},
+    // 8: PLANETARIO
+    {"Giove",               "Sessione planetaria Giove",           8},
+    {"Saturno",             "Sessione planetaria Saturno",         8},
+    {"Luna HD",             "Sessione planetaria Luna",            8},
+    {"Solare",              "Sessione imaging solare",             8},
+    {"Guida planetario",    "Guida imaging planetario",            8},
+    // 9: UTILITY
+    {"Metti la radio",      "Metti la radio",                      9},
+    {"Ferma la radio",      "Ferma la radio",                      9},
+    {"Che ore sono?",       "Che ore sono?",                       9},
+    {"Cosa sai fare?",      "Cosa sai fare?",                      9},
+    // 10: PROFILO
+    {"Mio profilo",         "Il mio profilo AstroBin",             10},
+    {"Strumentazione",      "La mia strumentazione",               10},
+};
+static constexpr int kQCmdButtonCount = sizeof(kQCmdButtons) / sizeof(kQCmdButtons[0]);
+
+void SkyGuardDisplay::HideQuickCmdBtns() {
+    if (qcmd_scroll_container_) lv_obj_add_flag(qcmd_scroll_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void SkyGuardDisplay::ShowQuickCmdBtns() {
+    if (qcmd_scroll_container_) lv_obj_clear_flag(qcmd_scroll_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Callback data for quick command buttons
+struct QCmdBtnData {
+    const char* text;
+};
+
+void SkyGuardDisplay::BuildPageQuickCmd() {
+    SetPageAccent(title_icon_, title_accent_, lv_color_hex(0x55FF88));  // Green — AI commands
+    lv_label_set_text(data_title_, "COMANDI AI");
+
+    if (!qcmd_built_) {
+        // Scrollable container
+        qcmd_scroll_container_ = lv_obj_create(data_area_);
+        lv_obj_remove_style_all(qcmd_scroll_container_);
+        lv_obj_set_size(qcmd_scroll_container_, lv_pct(100), lv_pct(100));
+        lv_obj_set_pos(qcmd_scroll_container_, 0, 18);
+        lv_obj_set_style_bg_opa(qcmd_scroll_container_, LV_OPA_TRANSP, 0);
+        lv_obj_set_flex_flow(qcmd_scroll_container_, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_flex_align(qcmd_scroll_container_, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(qcmd_scroll_container_, 3, 0);
+        lv_obj_set_style_pad_column(qcmd_scroll_container_, 3, 0);
+        lv_obj_set_style_pad_left(qcmd_scroll_container_, 2, 0);
+        lv_obj_add_flag(qcmd_scroll_container_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(qcmd_scroll_container_, LV_DIR_VER);
+        lv_obj_clear_flag(qcmd_scroll_container_, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_clear_flag(qcmd_scroll_container_, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+
+        int last_group = -1;
+        qcmd_btn_count_ = 0;
+
+        for (int i = 0; i < kQCmdButtonCount && qcmd_btn_count_ < QCMD_BTN_MAX; i++) {
+            // Group header
+            if (kQCmdButtons[i].group != last_group) {
+                last_group = kQCmdButtons[i].group;
+                lv_obj_t* hdr = lv_label_create(qcmd_scroll_container_);
+                lv_obj_set_width(hdr, 300);
+                lv_obj_set_style_text_font(hdr, GetTinyFont(), 0);
+                lv_obj_set_style_text_color(hdr, lv_color_hex(0x88AACC), 0);
+                lv_label_set_text(hdr, kQCmdGroupNames[last_group]);
+                lv_obj_set_style_pad_top(hdr, last_group == 0 ? 0 : 4, 0);
+            }
+
+            int grp = kQCmdButtons[i].group;
+            lv_color_t bg_color = (grp < 11) ? kQCmdGroupColors[grp] : lv_color_hex(0x222233);
+
+            lv_obj_t* btn = lv_button_create(qcmd_scroll_container_);
+            lv_obj_set_size(btn, 148, 26);
+            lv_obj_set_style_bg_color(btn, bg_color, 0);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(0x334455), LV_STATE_PRESSED);
+            lv_obj_set_style_radius(btn, 6, 0);
+            lv_obj_set_style_border_width(btn, 1, 0);
+            lv_obj_set_style_border_color(btn, lv_color_hex(0x3A3A5A), 0);
+            lv_obj_set_style_pad_all(btn, 2, 0);
+
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_obj_set_style_text_font(lbl, GetTinyFont(), 0);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(0xCCDDEE), 0);
+            lv_label_set_text(lbl, kQCmdButtons[i].label);
+            lv_obj_center(lbl);
+
+            // Store text pointer in user_data for click handler
+            auto* cbd = (QCmdBtnData*)lv_malloc(sizeof(QCmdBtnData));
+            cbd->text = kQCmdButtons[i].text;
+
+            lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+                lv_event_stop_bubbling(e);
+                auto* data = (QCmdBtnData*)lv_event_get_user_data(e);
+                if (data && data->text) {
+                    ESP_LOGI("SkyGuardUI", "Quick cmd: %s", data->text);
+                    Application::GetInstance().SendChatMessage(data->text);
+                }
+            }, LV_EVENT_CLICKED, cbd);
+
+            qcmd_btns_[qcmd_btn_count_++] = btn;
+        }
+
+        qcmd_built_ = true;
+    }
+    ShowQuickCmdBtns();
+}
+
 void SkyGuardDisplay::BuildPageEnvironment() {
     SetPageAccent(title_icon_, title_accent_, lv_color_hex(0xFF5544));  // Red-orange — temp
     lv_label_set_text(data_title_, "AMBIENTE");
@@ -2656,8 +2855,9 @@ void SkyGuardDisplay::Update() {
     // Skip page updates while boot loader is showing
     if (boot_loader_visible_) return;
 
-    // Auto-scroll pages (skip commands page)
-    if (auto_scroll_enabled_ && visible_ && !measuring_ && current_page_ != PAGE_MEASURE) {
+    // Auto-scroll pages (skip interactive pages: commands, quick cmd, control)
+    if (auto_scroll_enabled_ && visible_ && !measuring_ &&
+        current_page_ != PAGE_MEASURE && current_page_ != PAGE_QUICKCMD && current_page_ != PAGE_CONTROL) {
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         if (last_page_change_ms_ == 0) {
             last_page_change_ms_ = now;
@@ -2665,7 +2865,11 @@ void SkyGuardDisplay::Update() {
                    (current_page_ == PAGE_SQM ? auto_scroll_interval_ms_ * 2 : auto_scroll_interval_ms_)) {
             last_page_change_ms_ = now;
             int next = (current_page_ + 1);
-            if (next >= PAGE_MEASURE) next = PAGE_SQM;
+            // Skip interactive pages in auto-scroll
+            while (next == PAGE_CONTROL || next == PAGE_QUICKCMD || next >= PAGE_MEASURE) {
+                if (next >= PAGE_MEASURE) { next = PAGE_SQM; break; }
+                next++;
+            }
             if (!lvgl_port_lock(100)) return;
             SetPage((SkyGuardPage)next);
             lvgl_port_unlock();
@@ -3194,11 +3398,13 @@ void SkyGuardDisplay::UpdatePageWeather() {
         for (int i = 0; i < 5; i++) {
             if (weather_time_[i]) lv_label_set_text(weather_time_[i], "--:--");
             if (weather_cloud_val_[i]) lv_label_set_text(weather_cloud_val_[i], "--%");
+            if (weather_rain_[i]) lv_label_set_text(weather_rain_[i], "--");
             if (weather_wind_[i]) lv_label_set_text(weather_wind_[i], "--");
             if (weather_temp_[i]) lv_label_set_text(weather_temp_[i], "--");
             if (weather_daily_day_[i]) lv_label_set_text(weather_daily_day_[i], "--");
             if (weather_daily_temp_[i]) lv_label_set_text(weather_daily_temp_[i], "--");
             if (weather_daily_cloud_[i]) lv_label_set_text(weather_daily_cloud_[i], "--%");
+            if (weather_daily_rain_[i]) lv_label_set_text(weather_daily_rain_[i], "--");
         }
         return;
     }
@@ -3249,6 +3455,25 @@ void SkyGuardDisplay::UpdatePageWeather() {
                 (e.wind_speed > 10) ? SG_BAD_COLOR :
                 (e.wind_speed > 5) ? SG_WARN_COLOR : SG_GOOD_COLOR, 0);
         }
+
+        // Rain: probability + mm
+        if (weather_rain_[i]) {
+            if (e.pop > 0 || e.rain_3h > 0.05f) {
+                if (e.rain_3h > 0.05f) {
+                    snprintf(val_buf, sizeof(val_buf), "%d%% %.1f", e.pop, e.rain_3h);
+                } else {
+                    snprintf(val_buf, sizeof(val_buf), "%d%%", e.pop);
+                }
+                lv_label_set_text(weather_rain_[i], val_buf);
+                lv_obj_set_style_text_color(weather_rain_[i],
+                    (e.pop > 60 || e.rain_3h > 2.0f) ? SG_BAD_COLOR :
+                    (e.pop > 30 || e.rain_3h > 0.5f) ? SG_WARN_COLOR :
+                    lv_color_hex(0x55AAFF), 0);
+            } else {
+                lv_label_set_text(weather_rain_[i], "--");
+                lv_obj_set_style_text_color(weather_rain_[i], SG_DIM_COLOR, 0);
+            }
+        }
     }
 
     // ========== DAILY (5 columns) ==========
@@ -3279,6 +3504,25 @@ void SkyGuardDisplay::UpdatePageWeather() {
             lv_obj_set_style_text_color(weather_daily_cloud_[i],
                 (d.clouds_avg > 60) ? SG_BAD_COLOR :
                 (d.clouds_avg > 30) ? SG_WARN_COLOR : SG_GOOD_COLOR, 0);
+        }
+
+        // Daily rain: max probability + total mm
+        if (weather_daily_rain_[i]) {
+            if (d.pop_max > 0 || d.rain_total > 0.05f) {
+                if (d.rain_total > 0.05f) {
+                    snprintf(val_buf, sizeof(val_buf), "%d%% %.0f", d.pop_max, d.rain_total);
+                } else {
+                    snprintf(val_buf, sizeof(val_buf), "%d%%", d.pop_max);
+                }
+                lv_label_set_text(weather_daily_rain_[i], val_buf);
+                lv_obj_set_style_text_color(weather_daily_rain_[i],
+                    (d.pop_max > 60 || d.rain_total > 5.0f) ? SG_BAD_COLOR :
+                    (d.pop_max > 30 || d.rain_total > 1.0f) ? SG_WARN_COLOR :
+                    lv_color_hex(0x55AAFF), 0);
+            } else {
+                lv_label_set_text(weather_daily_rain_[i], "--");
+                lv_obj_set_style_text_color(weather_daily_rain_[i], SG_DIM_COLOR, 0);
+            }
         }
     }
 

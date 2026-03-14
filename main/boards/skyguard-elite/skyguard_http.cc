@@ -106,6 +106,9 @@ bool SkyGuardHttp::Post(const char* url, const char* json_body, char* response, 
 
     if (status != 200 && status != 201) {
         ESP_LOGW(TAG, "HTTP POST status %d for %s", status, url);
+        if (ctx.len > 0) {
+            ESP_LOGW(TAG, "Server response: %.*s", ctx.len > 200 ? 200 : ctx.len, response);
+        }
         return false;
     }
 

@@ -95,6 +95,9 @@ static void ParseOWMEntry(cJSON* item, ForecastEntry& e) {
     cJSON* vis = cJSON_GetObjectItem(item, "visibility");
     if (vis) e.visibility = vis->valuedouble;
 
+    cJSON* pop_val = cJSON_GetObjectItem(item, "pop");
+    if (pop_val) e.pop = (int)(pop_val->valuedouble * 100 + 0.5);
+
     cJSON* weather_arr = cJSON_GetObjectItem(item, "weather");
     if (weather_arr && cJSON_GetArraySize(weather_arr) > 0) {
         cJSON* w0 = cJSON_GetArrayItem(weather_arr, 0);
@@ -169,7 +172,7 @@ void SkyGuardWeather::DoFetch() {
     struct DayAcc {
         char date[11];       // "2026-03-13"
         float temp_min, temp_max, wind_max, rain_total;
-        int clouds_sum, hum_sum, sample_count;
+        int clouds_sum, hum_sum, pop_max, sample_count;
         char best_desc[32];
         int desc_count;      // count of most common description
     };
@@ -216,6 +219,9 @@ void SkyGuardWeather::DoFetch() {
         if (w) { cJSON* s = cJSON_GetObjectItem(w, "speed"); if (s) wind = s->valuedouble; }
         cJSON* r = cJSON_GetObjectItem(item, "rain");
         if (r) { cJSON* r3 = cJSON_GetObjectItem(r, "3h"); if (r3) rain = r3->valuedouble; }
+        int pop_val = 0;
+        cJSON* pop_obj = cJSON_GetObjectItem(item, "pop");
+        if (pop_obj) pop_val = (int)(pop_obj->valuedouble * 100 + 0.5);
 
         // Accumulate
         if (temp < days[di].temp_min) days[di].temp_min = temp;
@@ -223,6 +229,7 @@ void SkyGuardWeather::DoFetch() {
         if (wind > days[di].wind_max) days[di].wind_max = wind;
         days[di].clouds_sum += clouds;
         days[di].hum_sum += hum;
+        if (pop_val > days[di].pop_max) days[di].pop_max = pop_val;
         days[di].rain_total += rain;
         days[di].sample_count++;
 
@@ -266,6 +273,7 @@ void SkyGuardWeather::DoFetch() {
         de.wind_max = acc.wind_max;
         de.clouds_avg = acc.clouds_sum / acc.sample_count;
         de.humidity_avg = acc.hum_sum / acc.sample_count;
+        de.pop_max = acc.pop_max;
         de.rain_total = acc.rain_total;
         strncpy(de.description, acc.best_desc, 31);
 

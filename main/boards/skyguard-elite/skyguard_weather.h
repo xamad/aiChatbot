@@ -25,6 +25,7 @@ struct ForecastEntry {
     float sea_level;     // Sea-level pressure hPa
     int clouds;          // 0-100%
     int humidity;        // 0-100%
+    int pop;             // Probability of precipitation 0-100%
     float visibility;    // meters
     char description[32]; // "cielo sereno"
 };
@@ -36,6 +37,7 @@ struct DailyEntry {
     float wind_max;          // Max wind m/s
     int clouds_avg;          // Average cloud cover 0-100%
     int humidity_avg;        // Average humidity 0-100%
+    int pop_max;             // Max probability of precipitation 0-100%
     float rain_total;        // Total rain mm
     char description[32];    // Most common description
 };
