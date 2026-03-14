@@ -129,8 +129,8 @@
 // SKYGUARD ELITE: SENSOR I2C BUS (I2C_NUM_1 — expansion connector)
 // =============================================================================
 
-#define SENSOR_I2C_SDA_PIN      GPIO_NUM_21   // Expansion pin 4
-#define SENSOR_I2C_SCL_PIN      GPIO_NUM_14   // Expansion pin 3
+#define SENSOR_I2C_SDA_PIN      GPIO_NUM_14   // Expansion connector pin 1 (label "1014")
+#define SENSOR_I2C_SCL_PIN      GPIO_NUM_21   // Expansion connector pin 2 (label "1021")
 #define SENSOR_I2C_PORT         I2C_NUM_1
 #define SENSOR_I2C_SPEED_HZ     100000        // 100kHz — internal pullups (45kΩ) too weak for 400kHz
 

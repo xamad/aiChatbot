@@ -359,7 +359,7 @@ void SkyGuardDisplay::Setup() {
         // Big SQM value — centered in the arc
         sqm_big_value_ = lv_label_create(dash_left_card_);
         lv_obj_set_style_text_font(sqm_big_value_, &lv_font_montserrat_28, 0);
-        lv_obj_set_style_text_color(sqm_big_value_, lv_color_hex(0x55FF55), 0);
+        lv_obj_set_style_text_color(sqm_big_value_, lv_color_white(), 0);
         lv_label_set_text(sqm_big_value_, "--.-");
         lv_obj_set_pos(sqm_big_value_, 25, 30);
 
@@ -485,6 +485,13 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_color(dash_location_, SG_TEXT_COLOR, 0);
         lv_label_set_text(dash_location_, LV_SYMBOL_GPS " --");
         lv_obj_set_pos(dash_location_, 8, 4);
+
+        // Sensor status icons (right-aligned in bottom bar)
+        dash_sensor_status_ = lv_label_create(dash_bottom_bar_);
+        lv_obj_set_style_text_font(dash_sensor_status_, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(dash_sensor_status_, SG_DIM_COLOR, 0);
+        lv_label_set_text(dash_sensor_status_, "");
+        lv_obj_set_pos(dash_sensor_status_, 150, 4);
 
         dash_built_ = true;
     }
@@ -1576,9 +1583,10 @@ void SkyGuardDisplay::Setup() {
     // =====================================================================
     // Countdown measurement overlay (built once, hidden)
     // =====================================================================
-    countdown_container_ = lv_obj_create(data_area_);
+    // Countdown is on overlay_ (not data_area_) so it covers everything including buttons
+    countdown_container_ = lv_obj_create(overlay_);
     lv_obj_remove_style_all(countdown_container_);
-    lv_obj_set_size(countdown_container_, w - 32, data_area_h - 20);
+    lv_obj_set_size(countdown_container_, lv_pct(100), lv_pct(100));
     lv_obj_set_pos(countdown_container_, 0, 0);
     lv_obj_set_style_bg_color(countdown_container_, SG_BG_COLOR, 0);
     lv_obj_set_style_bg_opa(countdown_container_, LV_OPA_COVER, 0);
@@ -2328,32 +2336,50 @@ void SkyGuardDisplay::BuildPageTelescope() {
 // CONTROL PAGE — 8 touch buttons for telescope/INDI commands
 // ==========================================================================
 
-// Button definitions: label, command, param
-static const struct {
+// Button definitions: label, command, param, group (0=mount, 1=phd2, 2=nina, 3=utility)
+struct CtrlBtnDef {
     const char* label;
     const char* command;
     const char* param;
-} kCtrlButtons[8] = {
-    {"Track ON",    "tracking",   "on"},
-    {"Track OFF",   "tracking",   "off"},
-    {"Park",        "park",       ""},
-    {"Unpark",      "unpark",     ""},
-    {"Stop Slew",   "abortslew",  ""},
-    {"Find Home",   "findhome",   ""},
-    {"INDI Start",  "indi_start", ""},
-    {"INDI Stop",   "indi_stop",  ""},
+    int group;  // 0=Mount, 1=PHD2, 2=NINA, 3=Stellarium, 4=Utility
 };
+static const CtrlBtnDef kCtrlButtons[] = {
+    // --- Mount (ASCOM/INDI) ---
+    {"Track ON",    "tracking",     "on",       0},
+    {"Track OFF",   "tracking",     "off",      0},
+    {"Park",        "park",         "",         0},
+    {"Unpark",      "unpark",       "",         0},
+    {"Stop Slew",   "abortslew",    "",         0},
+    {"Find Home",   "findhome",     "",         0},
+    {"INDI Start",  "indi_start",   "",         0},
+    {"INDI Stop",   "indi_stop",    "",         0},
+    // --- PHD2 ---
+    {"PHD Guide",   "phd2_guide",   "start",    1},
+    {"PHD Stop",    "phd2_guide",   "stop",     1},
+    {"PHD Dither",  "phd2_dither",  "",         1},
+    {"PHD Calib",   "phd2_calib",   "",         1},
+    // --- NINA ---
+    {"NINA Start",  "nina_seq",     "start",    2},
+    {"NINA Stop",   "nina_seq",     "stop",     2},
+    {"NINA Pause",  "nina_seq",     "pause",    2},
+    {"NINA Focus",  "nina_af",      "",         2},
+    // --- Stellarium ---
+    {"Stell Slew",  "stell_slew",   "",         3},
+    {"Stell Sync",  "stell_sync",   "",         3},
+    // --- Utility ---
+    {"Dew ON",      "dew",          "on",       4},
+    {"Dew OFF",     "dew",          "off",      4},
+    {"Dew Auto",    "dew",          "auto",     4},
+    {"SQM Misura",  "sqm_measure",  "",         4},
+};
+static constexpr int kCtrlButtonCount = sizeof(kCtrlButtons) / sizeof(kCtrlButtons[0]);
 
 void SkyGuardDisplay::HideControlBtns() {
-    for (int i = 0; i < CTRL_BTN_COUNT; i++) {
-        if (ctrl_btns_[i]) lv_obj_add_flag(ctrl_btns_[i], LV_OBJ_FLAG_HIDDEN);
-    }
+    if (ctrl_scroll_container_) lv_obj_add_flag(ctrl_scroll_container_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void SkyGuardDisplay::ShowControlBtns() {
-    for (int i = 0; i < CTRL_BTN_COUNT; i++) {
-        if (ctrl_btns_[i]) lv_obj_clear_flag(ctrl_btns_[i], LV_OBJ_FLAG_HIDDEN);
-    }
+    if (ctrl_scroll_container_) lv_obj_clear_flag(ctrl_scroll_container_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void SkyGuardDisplay::BuildPageControl() {
@@ -2361,40 +2387,72 @@ void SkyGuardDisplay::BuildPageControl() {
     lv_label_set_text(data_title_, "CONTROLLI");
 
     if (!ctrl_built_) {
-        // 2x4 grid: 4 columns, 2 rows
-        // Available area: ~300x168 (data_area minus title)
-        int btn_w = 70;
-        int btn_h = 36;
-        int gap_x = 4;
-        int gap_y = 4;
-        int start_x = 4;
-        int start_y = 22;  // below title
+        // Group colors: Mount=blue, PHD2=green, NINA=purple, Stellarium=cyan, Utility=amber
+        static const lv_color_t kGroupColors[] = {
+            lv_color_hex(0x113355),  // 0: Mount
+            lv_color_hex(0x115533),  // 1: PHD2
+            lv_color_hex(0x331155),  // 2: NINA
+            lv_color_hex(0x115555),  // 3: Stellarium
+            lv_color_hex(0x443300),  // 4: Utility
+        };
+        static const lv_color_t kGroupPressColors[] = {
+            lv_color_hex(0x224466),
+            lv_color_hex(0x228844),
+            lv_color_hex(0x552288),
+            lv_color_hex(0x228888),
+            lv_color_hex(0x665500),
+        };
+        static const char* kGroupNames[] = {
+            "MONTATURA", "PHD2", "N.I.N.A.", "STELLARIUM", "UTILITA"
+        };
 
-        for (int i = 0; i < CTRL_BTN_COUNT; i++) {
-            int col = i % 4;
-            int row = i / 4;
+        // Scrollable container inside data_area
+        ctrl_scroll_container_ = lv_obj_create(data_area_);
+        lv_obj_remove_style_all(ctrl_scroll_container_);
+        lv_obj_set_size(ctrl_scroll_container_, lv_pct(100), lv_pct(100));
+        lv_obj_set_pos(ctrl_scroll_container_, 0, 18);  // below title
+        lv_obj_set_style_bg_opa(ctrl_scroll_container_, LV_OPA_TRANSP, 0);
+        lv_obj_set_flex_flow(ctrl_scroll_container_, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_flex_align(ctrl_scroll_container_, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(ctrl_scroll_container_, 3, 0);
+        lv_obj_set_style_pad_column(ctrl_scroll_container_, 3, 0);
+        lv_obj_set_style_pad_left(ctrl_scroll_container_, 2, 0);
+        lv_obj_add_flag(ctrl_scroll_container_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(ctrl_scroll_container_, LV_DIR_VER);
+        // Block horizontal gesture from triggering page swipe
+        lv_obj_clear_flag(ctrl_scroll_container_, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_clear_flag(ctrl_scroll_container_, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
 
-            ctrl_btns_[i] = lv_btn_create(data_area_);
-            lv_obj_set_size(ctrl_btns_[i], btn_w, btn_h);
-            lv_obj_set_pos(ctrl_btns_[i], start_x + col * (btn_w + gap_x),
-                           start_y + row * (btn_h + gap_y));
-            lv_obj_set_style_bg_color(ctrl_btns_[i], SG_BTN_COLOR, 0);
-            lv_obj_set_style_bg_color(ctrl_btns_[i], SG_BTN_PRESS_COLOR, LV_STATE_PRESSED);
-            lv_obj_set_style_radius(ctrl_btns_[i], 8, 0);
+        int last_group = -1;
+        ctrl_btn_count_ = 0;
 
-            // INDI buttons get different color
-            if (i >= 6) {
-                lv_obj_set_style_bg_color(ctrl_btns_[i], lv_color_hex(0x113322), 0);
-                lv_obj_set_style_bg_color(ctrl_btns_[i], lv_color_hex(0x226644), LV_STATE_PRESSED);
+        for (int i = 0; i < kCtrlButtonCount && ctrl_btn_count_ < CTRL_BTN_MAX; i++) {
+            // Add group header label when group changes
+            if (kCtrlButtons[i].group != last_group) {
+                last_group = kCtrlButtons[i].group;
+                lv_obj_t* header = lv_label_create(ctrl_scroll_container_);
+                lv_obj_set_width(header, lv_pct(100));
+                lv_obj_set_style_text_font(header, GetTinyFont(), 0);
+                lv_obj_set_style_text_color(header, SG_DIM_COLOR, 0);
+                lv_label_set_text(header, kGroupNames[last_group]);
+                lv_obj_set_style_pad_top(header, (i == 0) ? 0 : 4, 0);
             }
 
-            lv_obj_t* lbl = lv_label_create(ctrl_btns_[i]);
+            int grp = kCtrlButtons[i].group;
+            lv_obj_t* btn = lv_btn_create(ctrl_scroll_container_);
+            lv_obj_set_size(btn, 68, 30);
+            lv_obj_set_style_bg_color(btn, kGroupColors[grp], 0);
+            lv_obj_set_style_bg_color(btn, kGroupPressColors[grp], LV_STATE_PRESSED);
+            lv_obj_set_style_radius(btn, 6, 0);
+
+            lv_obj_t* lbl = lv_label_create(btn);
             lv_label_set_text(lbl, kCtrlButtons[i].label);
             lv_obj_set_style_text_font(lbl, GetTinyFont(), 0);
             lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
             lv_obj_center(lbl);
 
-            // Store button index in user data for callback
+            // Event callback with button index
             struct CtrlBtnData {
                 SkyGuardDisplay* disp;
                 int idx;
@@ -2403,7 +2461,8 @@ void SkyGuardDisplay::BuildPageControl() {
             cbd->disp = this;
             cbd->idx = i;
 
-            lv_obj_add_event_cb(ctrl_btns_[i], [](lv_event_t* e) {
+            lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+                lv_event_stop_bubbling(e);
                 auto* cbd = (CtrlBtnData*)lv_event_get_user_data(e);
                 if (cbd && cbd->disp && cbd->disp->ctrl_cb_) {
                     ESP_LOGI("CTRL", "Button %d: %s %s", cbd->idx,
@@ -2413,6 +2472,8 @@ void SkyGuardDisplay::BuildPageControl() {
                                         kCtrlButtons[cbd->idx].param);
                 }
             }, LV_EVENT_CLICKED, cbd);
+
+            ctrl_btns_[ctrl_btn_count_++] = btn;
         }
         ctrl_built_ = true;
     }
@@ -2452,6 +2513,7 @@ void SkyGuardDisplay::BuildPageMeasure() {
 
         lv_obj_add_event_cb(measure_btn_, [](lv_event_t* e) {
             ESP_LOGI("BTN", ">>> MEASURE btn clicked <<<");
+            lv_event_stop_bubbling(e);
             ((SkyGuardDisplay*)lv_event_get_user_data(e))->TriggerMeasurement();
         }, LV_EVENT_CLICKED, this);
     }
@@ -2473,6 +2535,7 @@ void SkyGuardDisplay::BuildPageMeasure() {
 
         lv_obj_add_event_cb(assist_btn_, [](lv_event_t* e) {
             ESP_LOGI("BTN", ">>> ASSIST btn clicked <<<");
+            lv_event_stop_bubbling(e);
             ((SkyGuardDisplay*)lv_event_get_user_data(e))->TriggerAssistant();
         }, LV_EVENT_CLICKED, this);
     }
@@ -2494,6 +2557,7 @@ void SkyGuardDisplay::BuildPageMeasure() {
 
         lv_obj_add_event_cb(night_btn_, [](lv_event_t* e) {
             ESP_LOGI("BTN", ">>> NIGHT btn clicked <<<");
+            lv_event_stop_bubbling(e);
             ((SkyGuardDisplay*)lv_event_get_user_data(e))->ToggleNightMode();
         }, LV_EVENT_CLICKED, this);
     } else {
@@ -2592,10 +2656,10 @@ void SkyGuardDisplay::UpdateDashboard() {
         snprintf(buf, sizeof(buf), "%.2f", mpsas);
         lv_label_set_text(sqm_big_value_, buf);
 
-        // Color by Bortle class
+        // Color by Bortle class (arc + bar only, text stays white for contrast)
         lv_color_t qc = (bortle <= 3) ? SG_GOOD_COLOR :
                          (bortle <= 5) ? SG_WARN_COLOR : SG_BAD_COLOR;
-        lv_obj_set_style_text_color(sqm_big_value_, qc, 0);
+        lv_obj_set_style_text_color(sqm_big_value_, lv_color_white(), 0);
 
         // Arc gauge: map MPSAS 10..22 → 0..100%
         int arc_val = (int)((mpsas - 10.0f) / 12.0f * 100.0f);
@@ -2780,6 +2844,18 @@ void SkyGuardDisplay::UpdateDashboard() {
             lv_label_set_text(dash_location_, LV_SYMBOL_GPS " GPS...");
         }
     }
+
+    // === SENSOR STATUS ICONS ===
+    if (dash_sensor_status_) {
+        bool gps_ok = (gps_ && gps_->HasFix());
+
+        snprintf(buf, sizeof(buf), "%s SQM %s SP %s TH %s GPS",
+                 tsl2591_ ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE,
+                 as7341_  ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE,
+                 aht20_   ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE,
+                 gps_ok   ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE);
+        lv_label_set_text(dash_sensor_status_, buf);
+    }
 }
 
 void SkyGuardDisplay::UpdatePageSpectral() {
@@ -2805,8 +2881,27 @@ void SkyGuardDisplay::UpdatePageSpectral() {
     };
 
     uint16_t max_val = 1;
+    uint32_t total = 0;
     for (int i = 0; i < 8; i++) {
         if (values[i] > max_val) max_val = values[i];
+        total += values[i];
+    }
+
+    // If all channels are essentially zero, sensor has no valid data
+    if (total < 10) {
+        for (int i = 0; i < 8; i++) {
+            lv_label_set_text(spectral_values_[i], "0");
+            lv_obj_set_size(spectral_bars_[i], 18, 4);
+        }
+        lv_label_set_text(spectral_ratios_, "Blu:-- Na:--");
+        lv_label_set_text(spectral_sqi_value_, "--");
+        lv_label_set_text(spectral_lp_source_, "In attesa dati...");
+        lv_obj_set_style_text_color(spectral_lp_source_, SG_DIM_COLOR, 0);
+        lv_label_set_text(spectral_lp_verdict_, "Misura necessaria");
+        lv_obj_set_style_text_color(spectral_lp_verdict_, SG_DIM_COLOR, 0);
+        lv_arc_set_value(spectral_sqi_arc_, 0);
+        lv_obj_set_style_arc_color(spectral_sqi_arc_, SG_DIM_COLOR, LV_PART_INDICATOR);
+        return;
     }
 
     // ── Left card: spectral bars ──
@@ -3846,7 +3941,8 @@ void SkyGuardDisplay::FinishMeasurement() {
         hum = aht20_->GetHumidity();
     }
 
-    bool ok = tsl2591_->Measure(temp, hum, press);
+    bool ok = false;
+    if (tsl2591_) ok = tsl2591_->Measure(temp, hum, press);
     if (as7341_) as7341_->Measure();
 
     if (!lvgl_port_lock(200)) {
@@ -3893,9 +3989,21 @@ void SkyGuardDisplay::HideCountdown() {
 // ==========================================================================
 
 void SkyGuardDisplay::TriggerAssistant() {
+    // Safety: only activate from PAGE_MEASURE to prevent accidental activation
+    if (current_page_ != PAGE_MEASURE) {
+        ESP_LOGW(TAG, "Assistant blocked — not on COMANDI page (page=%d)", current_page_);
+        return;
+    }
     ESP_LOGI(TAG, "Assistant triggered via touch button");
     auto& app = Application::GetInstance();
-    if (app.GetDeviceState() != kDeviceStateStarting) {
+    auto state = app.GetDeviceState();
+    if (state == kDeviceStateStarting) return;
+    // If already active, exit instead of toggling
+    if (state == kDeviceStateListening || state == kDeviceStateSpeaking ||
+        state == kDeviceStateConnecting) {
+        ESP_LOGI(TAG, "Chatbot already active — exiting");
+        app.ToggleChatState();
+    } else {
         app.ToggleChatState();
     }
 }
@@ -3978,7 +4086,7 @@ void SkyGuardDisplay::ApplyNightMode() {
     }
 
     // Control buttons
-    for (int i = 0; i < CTRL_BTN_COUNT; i++) {
+    for (int i = 0; i < ctrl_btn_count_; i++) {
         if (ctrl_btns_[i]) {
             lv_obj_set_style_bg_color(ctrl_btns_[i], SG_NIGHT_BTN, 0);
             lv_obj_t* lbl = lv_obj_get_child(ctrl_btns_[i], 0);
@@ -4147,10 +4255,11 @@ void SkyGuardDisplay::ApplyNormalMode() {
         if (lbl) lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
     }
 
-    // Control buttons restore
-    for (int i = 0; i < CTRL_BTN_COUNT; i++) {
+    // Control buttons restore — use group colors from kCtrlButtons
+    for (int i = 0; i < ctrl_btn_count_; i++) {
         if (ctrl_btns_[i]) {
-            lv_obj_set_style_bg_color(ctrl_btns_[i], (i >= 6) ? lv_color_hex(0x113322) : SG_BTN_COLOR, 0);
+            // Restore original group color (approximate — just use SG_BTN_COLOR)
+            lv_obj_set_style_bg_color(ctrl_btns_[i], SG_BTN_COLOR, 0);
             lv_obj_t* lbl = lv_obj_get_child(ctrl_btns_[i], 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
         }

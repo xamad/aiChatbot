@@ -132,6 +132,96 @@ private:
     ledc_channel_t dew_ledc_ch_ = LEDC_CHANNEL_1;  // Channel 0 = backlight
 
     // =========================================================================
+    // READING CACHE — store readings when offline, send when back online
+    // =========================================================================
+    static constexpr int CACHE_MAX = 288;  // 24h at 5min intervals
+
+    struct CachedReading {
+        char* json;       // Heap-allocated JSON string (PSRAM)
+        uint32_t timestamp; // Uptime seconds when captured
+        bool sent;
+    };
+
+    CachedReading* reading_cache_ = nullptr;  // Ring buffer [CACHE_MAX]
+    int cache_head_ = 0;    // Next write position
+    int cache_count_ = 0;   // Number of unsent entries
+    bool cache_initialized_ = false;
+
+    void InitReadingCache() {
+        reading_cache_ = (CachedReading*)heap_caps_calloc(CACHE_MAX, sizeof(CachedReading), MALLOC_CAP_SPIRAM);
+        if (!reading_cache_) {
+            reading_cache_ = (CachedReading*)calloc(CACHE_MAX, sizeof(CachedReading));
+        }
+        if (reading_cache_) {
+            cache_initialized_ = true;
+            ESP_LOGI(TAG, "Reading cache ready: %d slots (%d bytes PSRAM)",
+                     CACHE_MAX, (int)(CACHE_MAX * sizeof(CachedReading)));
+        } else {
+            ESP_LOGE(TAG, "Reading cache alloc FAILED");
+        }
+    }
+
+    // Add a reading to cache. Takes ownership of json string.
+    void CacheReading(char* json) {
+        if (!cache_initialized_ || !reading_cache_) {
+            cJSON_free(json);
+            return;
+        }
+        // Free old entry if overwriting
+        if (reading_cache_[cache_head_].json) {
+            cJSON_free(reading_cache_[cache_head_].json);
+            if (!reading_cache_[cache_head_].sent && cache_count_ > 0) cache_count_--;
+        }
+        reading_cache_[cache_head_].json = json;
+        reading_cache_[cache_head_].timestamp = (uint32_t)(esp_timer_get_time() / 1000000);
+        reading_cache_[cache_head_].sent = false;
+        cache_head_ = (cache_head_ + 1) % CACHE_MAX;
+        cache_count_++;
+        ESP_LOGI(TAG, "Reading cached (pending=%d)", cache_count_);
+    }
+
+    // Try to send all unsent cached readings
+    void FlushReadingCache() {
+        if (!cache_initialized_ || !reading_cache_ || cache_count_ == 0) return;
+        if (sqm_server_url_.empty()) return;
+
+        char url[128];
+        snprintf(url, sizeof(url), "%s/api/readings", sqm_server_url_.c_str());
+        const char* api_key = sqm_api_key_.empty() ? nullptr : sqm_api_key_.c_str();
+
+        int sent = 0, failed = 0;
+        for (int i = 0; i < CACHE_MAX && sent + failed < cache_count_; i++) {
+            auto& entry = reading_cache_[i];
+            if (!entry.json || entry.sent) continue;
+
+            char* resp = SkyGuardHttp::AllocBuffer(256);
+            if (!resp) break;
+
+            bool ok = SkyGuardHttp::Post(url, entry.json, resp, 256, 10000, api_key);
+            free(resp);
+
+            if (ok) {
+                entry.sent = true;
+                cJSON_free(entry.json);
+                entry.json = nullptr;
+                sent++;
+            } else {
+                failed++;
+                // Stop on first failure — server probably unreachable
+                break;
+            }
+            // Yield between posts to avoid watchdog
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        cache_count_ -= sent;
+        if (cache_count_ < 0) cache_count_ = 0;
+        if (sent > 0) {
+            ESP_LOGI(TAG, "Cache flush: %d sent, %d remaining", sent, cache_count_);
+        }
+    }
+
+    // =========================================================================
     // INITIALIZATION METHODS
     // =========================================================================
 
@@ -232,12 +322,31 @@ private:
     }
 
     void InitializeSensorI2c() {
-        // Sensors are on the SHARED I2C bus (I2C_NUM_0, GPIO 15/16)
-        // The LCDWiki 2.8" board's I2C connector shares with touch+audio.
-        // We reuse display_i2c_bus_ for sensors instead of a separate bus.
-        sensor_i2c_bus_ = display_i2c_bus_;
-        ESP_LOGI(TAG, "Sensors using shared I2C_NUM_0 bus (same as touch/audio)");
-        ESP_LOGI(TAG, "NOTE: AHT20 disabled — address 0x38 conflicts with FT6336G touch");
+        // Sensors on SEPARATE I2C_NUM_1 bus (expansion connector GPIO14/GPIO21)
+        // This avoids conflict with touch FT6336G (0x38) on I2C_NUM_0
+        ESP_LOGI(TAG, "Creating sensor I2C bus: SDA=GPIO%d SCL=GPIO%d port=%d speed=%dHz",
+                 SENSOR_I2C_SDA_PIN, SENSOR_I2C_SCL_PIN, SENSOR_I2C_PORT, SENSOR_I2C_SPEED_HZ);
+
+        i2c_master_bus_config_t cfg = {
+            .i2c_port = SENSOR_I2C_PORT,
+            .sda_io_num = SENSOR_I2C_SDA_PIN,
+            .scl_io_num = SENSOR_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = { .enable_internal_pullup = 1 },
+        };
+        esp_err_t ret = i2c_new_master_bus(&cfg, &sensor_i2c_bus_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Sensor I2C bus init FAILED: %s — falling back to shared bus", esp_err_to_name(ret));
+            sensor_i2c_bus_ = display_i2c_bus_;
+            return;
+        }
+        ESP_LOGI(TAG, "Sensor I2C bus ready (I2C_NUM_1, separate from touch/audio)");
+
+        // Scan to verify sensors are present
+        ScanI2cBus(sensor_i2c_bus_, "Sensor/I2C1");
     }
 
     void InitializeDisplay() {
@@ -368,52 +477,136 @@ private:
             .device_address = addr,
             .scl_speed_hz = 100000,
         };
-        if (i2c_master_bus_add_device(bus, &cfg, &dev) != ESP_OK) return false;
-        uint8_t reg = 0x00;
-        esp_err_t ret = i2c_master_transmit(dev, &reg, 1, 50);
+        esp_err_t add_ret = i2c_master_bus_add_device(bus, &cfg, &dev);
+        if (add_ret != ESP_OK) {
+            ESP_LOGW(TAG, "  Probe 0x%02X: add_device failed: %s", addr, esp_err_to_name(add_ret));
+            return false;
+        }
+        // Use i2c_master_probe instead of transmit — more reliable for device detection
+        esp_err_t ret = i2c_master_probe(bus, addr, 200);
         i2c_master_bus_rm_device(dev);
+        if (ret != ESP_OK) {
+            ESP_LOGD(TAG, "  Probe 0x%02X: no ACK (%s)", addr, esp_err_to_name(ret));
+        }
         return (ret == ESP_OK);
     }
 
-    void InitializeSensors() {
-        if (!sensor_i2c_bus_) {
-            ESP_LOGW(TAG, "Sensor I2C bus not available — skipping all sensors");
-            return;
+    // Try to find a sensor on either bus (display first, then expansion)
+    i2c_master_bus_handle_t FindSensorBus(uint8_t addr) {
+        // Try display bus first (I2C_NUM_0, GPIO15/16)
+        if (display_i2c_bus_ && ProbeI2cDevice(display_i2c_bus_, addr)) {
+            ESP_LOGI(TAG, "  0x%02X found on display bus (I2C_NUM_0)", addr);
+            return display_i2c_bus_;
         }
-        ESP_LOGI(TAG, "Initializing SkyGuard sensors on I2C_NUM_1");
+        // Try expansion bus (I2C_NUM_1, GPIO14/21)
+        if (sensor_i2c_bus_ && sensor_i2c_bus_ != display_i2c_bus_ &&
+            ProbeI2cDevice(sensor_i2c_bus_, addr)) {
+            ESP_LOGI(TAG, "  0x%02X found on expansion bus (I2C_NUM_1)", addr);
+            return sensor_i2c_bus_;
+        }
+        ESP_LOGW(TAG, "  0x%02X not found on any bus", addr);
+        return nullptr;
+    }
 
-        // TSL2591 — Sky Brightness (probe first to avoid ESP_ERROR_CHECK abort)
-        if (ProbeI2cDevice(sensor_i2c_bus_, TSL2591_I2C_ADDR)) {
-            tsl2591_ = new Tsl2591Device(sensor_i2c_bus_, TSL2591_I2C_ADDR, 400000);
-            if (!tsl2591_->Initialize()) {
-                ESP_LOGW(TAG, "TSL2591 init failed — SQM disabled");
-                delete tsl2591_;
-                tsl2591_ = nullptr;
-            } else {
-                ESP_LOGI(TAG, "TSL2591 OK at 0x%02X", TSL2591_I2C_ADDR);
+    void InitializeSensors() {
+        ESP_LOGI(TAG, "Initializing SkyGuard sensors");
+
+        // Wait for I2C bus to settle after touch/audio init
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // TSL2591 — Sky Brightness
+        // Hardware: physically on I2C connector (GPIO15/16 = display bus)
+        // Fallback: try expansion bus if not found on display bus
+        {
+            i2c_master_bus_handle_t bus = nullptr;
+            // Try display bus first (where it's physically wired)
+            if (display_i2c_bus_) {
+                ESP_LOGI(TAG, "Probing TSL2591 (0x%02X) on display bus...", TSL2591_I2C_ADDR);
+                if (ProbeI2cDevice(display_i2c_bus_, TSL2591_I2C_ADDR)) {
+                    bus = display_i2c_bus_;
+                    ESP_LOGI(TAG, "  TSL2591 found on display bus (I2C_NUM_0)");
+                }
             }
-        } else {
-            ESP_LOGW(TAG, "TSL2591 not found at 0x%02X — SQM disabled", TSL2591_I2C_ADDR);
+            // Try expansion bus as fallback
+            if (!bus && sensor_i2c_bus_ && sensor_i2c_bus_ != display_i2c_bus_) {
+                ESP_LOGI(TAG, "Probing TSL2591 (0x%02X) on expansion bus...", TSL2591_I2C_ADDR);
+                if (ProbeI2cDevice(sensor_i2c_bus_, TSL2591_I2C_ADDR)) {
+                    bus = sensor_i2c_bus_;
+                    ESP_LOGI(TAG, "  TSL2591 found on expansion bus (I2C_NUM_1)");
+                }
+            }
+            if (bus) {
+                // 400kHz OK on display bus (external pullups); 100kHz on expansion bus
+                uint32_t spd = (bus == display_i2c_bus_) ? 400000 : SENSOR_I2C_SPEED_HZ;
+                tsl2591_ = new Tsl2591Device(bus, TSL2591_I2C_ADDR, spd);
+                if (!tsl2591_->Initialize()) {
+                    ESP_LOGW(TAG, "TSL2591 init failed — SQM disabled");
+                    delete tsl2591_;
+                    tsl2591_ = nullptr;
+                } else {
+                    ESP_LOGI(TAG, "TSL2591 OK — SQM enabled");
+                }
+            } else {
+                ESP_LOGW(TAG, "TSL2591 NOT FOUND on any bus — SQM disabled");
+            }
         }
 
         // AS7341 — Spectral Analysis
-        if (ProbeI2cDevice(sensor_i2c_bus_, AS7341_I2C_ADDR)) {
-            as7341_ = new As7341Device(sensor_i2c_bus_, AS7341_I2C_ADDR, 400000);
-            if (!as7341_->Initialize()) {
-                ESP_LOGW(TAG, "AS7341 init failed — spectral disabled");
-                delete as7341_;
-                as7341_ = nullptr;
-            } else {
-                ESP_LOGI(TAG, "AS7341 OK at 0x%02X", AS7341_I2C_ADDR);
+        // Hardware: physically on I2C connector (GPIO15/16 = display bus)
+        {
+            i2c_master_bus_handle_t bus = nullptr;
+            if (display_i2c_bus_) {
+                ESP_LOGI(TAG, "Probing AS7341 (0x%02X) on display bus...", AS7341_I2C_ADDR);
+                if (ProbeI2cDevice(display_i2c_bus_, AS7341_I2C_ADDR)) {
+                    bus = display_i2c_bus_;
+                    ESP_LOGI(TAG, "  AS7341 found on display bus (I2C_NUM_0)");
+                }
             }
-        } else {
-            ESP_LOGW(TAG, "AS7341 not found at 0x%02X — spectral disabled", AS7341_I2C_ADDR);
+            if (!bus && sensor_i2c_bus_ && sensor_i2c_bus_ != display_i2c_bus_) {
+                ESP_LOGI(TAG, "Probing AS7341 (0x%02X) on expansion bus...", AS7341_I2C_ADDR);
+                if (ProbeI2cDevice(sensor_i2c_bus_, AS7341_I2C_ADDR)) {
+                    bus = sensor_i2c_bus_;
+                    ESP_LOGI(TAG, "  AS7341 found on expansion bus (I2C_NUM_1)");
+                }
+            }
+            if (bus) {
+                uint32_t spd = (bus == display_i2c_bus_) ? 400000 : SENSOR_I2C_SPEED_HZ;
+                as7341_ = new As7341Device(bus, AS7341_I2C_ADDR, spd);
+                if (!as7341_->Initialize()) {
+                    ESP_LOGW(TAG, "AS7341 init failed — spectral disabled");
+                    delete as7341_;
+                    as7341_ = nullptr;
+                } else {
+                    ESP_LOGI(TAG, "AS7341 OK — spectral enabled");
+                }
+            } else {
+                ESP_LOGW(TAG, "AS7341 NOT FOUND on any bus — spectral disabled");
+            }
         }
 
-        // AHT20 — DISABLED: address 0x38 conflicts with FT6336G touch on shared bus
-        // When sensors move to separate I2C_NUM_1 bus (expansion connector), re-enable this
-        ESP_LOGW(TAG, "AHT20 SKIPPED — 0x38 conflicts with touch FT6336G on shared I2C bus");
-        aht20_ = nullptr;
+        // AHT20 — Temp/Humidity (0x38 conflicts with touch on display bus)
+        // MUST use expansion bus only to avoid FT6336G conflict
+        if (sensor_i2c_bus_ && sensor_i2c_bus_ != display_i2c_bus_) {
+            ESP_LOGI(TAG, "Probing AHT20 (0x%02X) on expansion bus...", AHT20_I2C_ADDR);
+            if (ProbeI2cDevice(sensor_i2c_bus_, AHT20_I2C_ADDR)) {
+                aht20_ = new Aht20Device(sensor_i2c_bus_, AHT20_I2C_ADDR, SENSOR_I2C_SPEED_HZ);
+                if (!aht20_->Initialize()) {
+                    ESP_LOGW(TAG, "AHT20 init failed — environment disabled");
+                    delete aht20_;
+                    aht20_ = nullptr;
+                } else {
+                    ESP_LOGI(TAG, "AHT20 OK — environment enabled (expansion bus)");
+                }
+            } else {
+                ESP_LOGW(TAG, "AHT20 not found at 0x%02X on expansion bus", AHT20_I2C_ADDR);
+                aht20_ = nullptr;
+            }
+        } else {
+            ESP_LOGW(TAG, "AHT20 SKIPPED — no separate bus (0x38 = touch conflict)");
+            aht20_ = nullptr;
+        }
+
+        ESP_LOGI(TAG, "Sensor init done: TSL=%p AS=%p AHT=%p", tsl2591_, as7341_, aht20_);
     }
 
     void InitializeGps() {
@@ -2317,10 +2510,32 @@ private:
             alt = gps_->GetAltitude();
             gps_sats = gps_->GetSatellites();
             gps_hdop = gps_->GetHdop();
+            ESP_LOGI(TAG, "SQM POST position: GPS fix (%.4f, %.4f)", lat, lon);
         } else if (wifi_geo_ && wifi_geo_->GetLocation().valid) {
             const auto& loc = wifi_geo_->GetLocation();
-            lat = loc.latitude;
-            lon = loc.longitude;
+            // IP geolocation is very inaccurate (~5km, often wrong city)
+            // Prefer NVS fallback coordinates which are user-configured
+            if (strcmp(loc.source, "ip") == 0) {
+                Settings sg_pos("skyguard", false);
+                std::string fb_lat = sg_pos.GetString("fallback_lat", "44.9019");
+                std::string fb_lon = sg_pos.GetString("fallback_lon", "8.1662");
+                lat = std::strtof(fb_lat.c_str(), nullptr);
+                lon = std::strtof(fb_lon.c_str(), nullptr);
+                ESP_LOGI(TAG, "SQM POST position: NVS fallback (%.4f, %.4f) — IP geo too inaccurate", lat, lon);
+            } else {
+                // WiFi Google or static fallback — accurate enough
+                lat = loc.latitude;
+                lon = loc.longitude;
+                ESP_LOGI(TAG, "SQM POST position: %s (%.4f, %.4f)", loc.source, lat, lon);
+            }
+        } else {
+            // No geolocation resolved at all — use NVS fallback
+            Settings sg_pos("skyguard", false);
+            std::string fb_lat = sg_pos.GetString("fallback_lat", "44.9019");
+            std::string fb_lon = sg_pos.GetString("fallback_lon", "8.1662");
+            lat = std::strtof(fb_lat.c_str(), nullptr);
+            lon = std::strtof(fb_lon.c_str(), nullptr);
+            ESP_LOGI(TAG, "SQM POST position: NVS fallback (%.4f, %.4f) — no geo", lat, lon);
         }
 
         // Astro calculations
@@ -2335,6 +2550,33 @@ private:
         // Build nested JSON using cJSON
         cJSON* root = cJSON_CreateObject();
         if (!root) { ESP_LOGE(TAG, "OOM cJSON root"); return; }
+
+        // --- flat root fields (server-expected format) ---
+        if (tsl2591_) {
+            cJSON_AddNumberToObject(root, "mpsas", tsl2591_->GetMpsas());
+            cJSON_AddNumberToObject(root, "nelm", tsl2591_->GetNelm());
+        }
+        if (aht20_) {
+            cJSON_AddNumberToObject(root, "temperature", aht20_->GetTemperature() + temp_offset_);
+            float hum_flat = aht20_->GetHumidity() + hum_offset_;
+            if (hum_flat > 100.0f) hum_flat = 100.0f;
+            if (hum_flat < 0.0f) hum_flat = 0.0f;
+            cJSON_AddNumberToObject(root, "humidity", hum_flat);
+        }
+        if (privacy_enabled) {
+            cJSON_AddNumberToObject(root, "latitude", 0);
+            cJSON_AddNumberToObject(root, "longitude", 0);
+        } else {
+            cJSON_AddNumberToObject(root, "latitude", lat);
+            cJSON_AddNumberToObject(root, "longitude", lon);
+        }
+        // cloud_cover from weather forecast or 0
+        int cloud_cover = 0;
+        if (weather_ && weather_->HasData()) {
+            ForecastData fc_flat = weather_->GetForecast();
+            if (fc_flat.count > 0) cloud_cover = fc_flat.entries[0].clouds;
+        }
+        cJSON_AddNumberToObject(root, "cloud_cover", cloud_cover);
 
         // --- device ---
         cJSON* dev = cJSON_AddObjectToObject(root, "device");
@@ -2371,23 +2613,30 @@ private:
             cJSON_AddNumberToObject(sqm, "integration", tsl2591_->GetIntegrationSetting());
         }
 
-        // --- spectral ---
+        // --- spectral (same format as Pro board) ---
         if (as7341_) {
             auto& r = as7341_->GetReading();
             cJSON* sp = cJSON_AddObjectToObject(root, "spectral");
-            cJSON* ch = cJSON_AddObjectToObject(sp, "channels");
-            cJSON_AddNumberToObject(ch, "f1_415nm", r.f1_415nm);
-            cJSON_AddNumberToObject(ch, "f2_445nm", r.f2_445nm);
-            cJSON_AddNumberToObject(ch, "f3_480nm", r.f3_480nm);
-            cJSON_AddNumberToObject(ch, "f4_515nm", r.f4_515nm);
-            cJSON_AddNumberToObject(ch, "f5_555nm", r.f5_555nm);
-            cJSON_AddNumberToObject(ch, "f6_590nm", r.f6_590nm);
-            cJSON_AddNumberToObject(ch, "f7_630nm", r.f7_630nm);
-            cJSON_AddNumberToObject(ch, "f8_680nm", r.f8_680nm);
-            cJSON_AddNumberToObject(sp, "blue_ratio", as7341_->GetBlueRatio());
-            cJSON_AddNumberToObject(sp, "sodium_ratio", as7341_->GetSodiumRatio());
-            cJSON_AddNumberToObject(sp, "spectral_index", as7341_->GetSpectralQuality());
-            cJSON_AddStringToObject(sp, "lp_source", as7341_->GetLpSourceName());
+            // Channels as array of {name, value} — matches Pro format
+            cJSON* ch_arr = cJSON_AddArrayToObject(sp, "channels");
+            const struct { const char* name; uint16_t value; } ch_data[] = {
+                {"F1_415nm", r.f1_415nm}, {"F2_445nm", r.f2_445nm},
+                {"F3_480nm", r.f3_480nm}, {"F4_515nm", r.f4_515nm},
+                {"F5_555nm", r.f5_555nm}, {"F6_590nm", r.f6_590nm},
+                {"F7_630nm", r.f7_630nm}, {"F8_680nm", r.f8_680nm},
+            };
+            for (auto& c : ch_data) {
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "name", c.name);
+                cJSON_AddNumberToObject(item, "value", c.value);
+                cJSON_AddItemToArray(ch_arr, item);
+            }
+            cJSON_AddNumberToObject(sp, "clear", r.clear);
+            cJSON_AddNumberToObject(sp, "nir", r.nir);
+            cJSON_AddNumberToObject(sp, "blueRatio", as7341_->GetBlueRatio());
+            cJSON_AddNumberToObject(sp, "sodiumRatio", as7341_->GetSodiumRatio());
+            cJSON_AddNumberToObject(sp, "spectralIndex", as7341_->GetSpectralQuality());
+            cJSON_AddStringToObject(sp, "lpSource", as7341_->GetLpSourceName());
         }
 
         // --- environment ---
@@ -2516,22 +2765,34 @@ private:
         cJSON_Delete(root);
         if (!json) { ESP_LOGE(TAG, "cJSON print failed"); return; }
 
-        // POST to server
+        // Try to POST immediately
         char url[128];
         snprintf(url, sizeof(url), "%s/api/readings", sqm_server_url_.c_str());
 
         char* resp = SkyGuardHttp::AllocBuffer(512);
+        bool posted = false;
         if (resp) {
-            bool ok = SkyGuardHttp::Post(url, json, resp, 512, 15000,
-                                          sqm_api_key_.empty() ? nullptr : sqm_api_key_.c_str());
-            if (ok) {
+            posted = SkyGuardHttp::Post(url, json, resp, 512, 15000,
+                                         sqm_api_key_.empty() ? nullptr : sqm_api_key_.c_str());
+            if (posted) {
                 ESP_LOGI(TAG, "Reading posted OK → %s", resp);
             } else {
-                ESP_LOGW(TAG, "Failed to post reading to %s", url);
+                ESP_LOGW(TAG, "Failed to post reading — caching for later");
             }
             free(resp);
         }
-        cJSON_free(json);
+
+        if (posted) {
+            // Sent OK — free json and try flushing any cached readings
+            cJSON_free(json);
+            if (cache_count_ > 0) {
+                ESP_LOGI(TAG, "Server reachable — flushing %d cached readings", cache_count_);
+                FlushReadingCache();
+            }
+        } else {
+            // Failed — cache the reading for later (takes ownership of json)
+            CacheReading(json);
+        }
     }
 
     void InitializeSkyGuardDisplay() {
@@ -2566,6 +2827,7 @@ private:
                 char url[256];
                 char resp[256] = {};
 
+                // --- INDI commands ---
                 if (strcmp(c->cmd, "indi_start") == 0) {
                     if (!c->b->indi_url_.empty()) {
                         snprintf(url, sizeof(url), "%s/api/server/start/default", c->b->indi_url_.c_str());
@@ -2578,7 +2840,99 @@ private:
                         SkyGuardHttp::Post(url, "", resp, sizeof(resp));
                         ESP_LOGI(TAG, "INDI stop: %s", resp);
                     }
-                } else if (!c->b->alpaca_url_.empty()) {
+                }
+                // --- PHD2 commands ---
+                else if (strcmp(c->cmd, "phd2_guide") == 0) {
+                    // PHD2 uses JSON-RPC on port 4400
+                    Settings sg("skyguard", false);
+                    std::string phd2_host = sg.GetString("phd2_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:4400", phd2_host.c_str());
+                    char body[128];
+                    if (strcmp(c->par, "start") == 0) {
+                        snprintf(body, sizeof(body), "{\"method\":\"guide\",\"params\":[{\"settle\":{\"pixels\":1.5,\"time\":8,\"timeout\":40}}],\"id\":1}");
+                    } else {
+                        snprintf(body, sizeof(body), "{\"method\":\"stop_capture\",\"params\":[],\"id\":1}");
+                    }
+                    SkyGuardHttp::Post(url, body, resp, sizeof(resp));
+                    ESP_LOGI(TAG, "PHD2 %s: %s", c->par, resp);
+                } else if (strcmp(c->cmd, "phd2_dither") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string phd2_host = sg.GetString("phd2_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:4400", phd2_host.c_str());
+                    SkyGuardHttp::Post(url, "{\"method\":\"dither\",\"params\":[5,false,{\"pixels\":1.5,\"time\":8,\"timeout\":30}],\"id\":1}", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "PHD2 dither: %s", resp);
+                } else if (strcmp(c->cmd, "phd2_calib") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string phd2_host = sg.GetString("phd2_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:4400", phd2_host.c_str());
+                    SkyGuardHttp::Post(url, "{\"method\":\"clear_calibration\",\"params\":[\"both\"],\"id\":1}", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "PHD2 calibrate: %s", resp);
+                }
+                // --- NINA commands ---
+                else if (strcmp(c->cmd, "nina_seq") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string nina_host = sg.GetString("nina_host", "192.168.1.100");
+                    if (strcmp(c->par, "start") == 0) {
+                        snprintf(url, sizeof(url), "http://%s:1888/api/v2/sequence/start", nina_host.c_str());
+                    } else if (strcmp(c->par, "stop") == 0) {
+                        snprintf(url, sizeof(url), "http://%s:1888/api/v2/sequence/stop", nina_host.c_str());
+                    } else {
+                        snprintf(url, sizeof(url), "http://%s:1888/api/v2/sequence/pause", nina_host.c_str());
+                    }
+                    SkyGuardHttp::Post(url, "", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "NINA seq %s: %s", c->par, resp);
+                } else if (strcmp(c->cmd, "nina_af") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string nina_host = sg.GetString("nina_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:1888/api/v2/focuser/autofocus", nina_host.c_str());
+                    SkyGuardHttp::Post(url, "", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "NINA autofocus: %s", resp);
+                }
+                // --- Stellarium commands ---
+                else if (strcmp(c->cmd, "stell_slew") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string stell_host = sg.GetString("stellarium_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:8090/api/main/focus", stell_host.c_str());
+                    SkyGuardHttp::Post(url, "target=selection", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "Stellarium slew: %s", resp);
+                } else if (strcmp(c->cmd, "stell_sync") == 0) {
+                    Settings sg("skyguard", false);
+                    std::string stell_host = sg.GetString("stellarium_host", "192.168.1.100");
+                    snprintf(url, sizeof(url), "http://%s:8090/api/stelaction/do", stell_host.c_str());
+                    SkyGuardHttp::Post(url, "id=actionSync_Telescope_With_Selected_Object", resp, sizeof(resp));
+                    ESP_LOGI(TAG, "Stellarium sync: %s", resp);
+                }
+                // --- Dew heater ---
+                else if (strcmp(c->cmd, "dew") == 0) {
+                    if (strcmp(c->par, "on") == 0) c->b->dew_mode_ = 1;
+                    else if (strcmp(c->par, "off") == 0) c->b->dew_mode_ = 0;
+                    else if (strcmp(c->par, "auto") == 0) c->b->dew_mode_ = 2;
+                    // Apply immediately
+                    if (c->b->dew_gpio_ >= 0) {
+                        if (c->b->dew_mode_ == 1) {
+                            int duty = (c->b->dew_power_ * 255) / 100;
+                            ledc_set_duty(LEDC_LOW_SPEED_MODE, c->b->dew_ledc_ch_, duty);
+                            ledc_update_duty(LEDC_LOW_SPEED_MODE, c->b->dew_ledc_ch_);
+                            c->b->dew_heater_active_ = true;
+                        } else if (c->b->dew_mode_ == 0) {
+                            ledc_set_duty(LEDC_LOW_SPEED_MODE, c->b->dew_ledc_ch_, 0);
+                            ledc_update_duty(LEDC_LOW_SPEED_MODE, c->b->dew_ledc_ch_);
+                            c->b->dew_heater_active_ = false;
+                        }
+                    }
+                    ESP_LOGI(TAG, "Dew heater mode: %d", c->b->dew_mode_);
+                }
+                // --- SQM measure from control page ---
+                else if (strcmp(c->cmd, "sqm_measure") == 0) {
+                    if (c->b->sg_display_ && !c->b->sg_display_->IsMeasuring()) {
+                        if (lvgl_port_lock(200)) {
+                            c->b->sg_display_->TriggerMeasurement();
+                            lvgl_port_unlock();
+                        }
+                    }
+                }
+                // --- ASCOM Alpaca mount ---
+                else if (!c->b->alpaca_url_.empty()) {
                     const char* base = c->b->alpaca_url_.c_str();
                     if (strcmp(c->cmd, "tracking") == 0) {
                         snprintf(url, sizeof(url), "%s/api/v1/telescope/0/tracking", base);
@@ -2863,8 +3217,8 @@ private:
                     }
                 }
 
-                // Post full reading to SQM server — every 5 min (300s)
-                if (board->tick_counter_ % 300 == 50 && board->tick_counter_ > 300) {
+                // Post full reading to SQM server — every 5 min (300s), first at 60s
+                if (board->tick_counter_ % 300 == 50 && board->tick_counter_ >= 50) {
                     xTaskCreate([](void* arg) {
                         auto* board = (SkyGuardEliteBoard*)arg;
                         board->PostReadingToServer();
@@ -2956,6 +3310,23 @@ private:
                     }, "sg_indi", 6144, board, 2, nullptr);
                 }
 
+                // Periodic sensor measurements — every 2 min, with countdown overlay
+                // TriggerMeasurement() shows countdown on display, then measures TSL+AS together
+                if ((board->tsl2591_ || board->as7341_) &&
+                    board->tick_counter_ >= 120 && board->tick_counter_ % 120 == 5) {
+                    if (board->sg_display_ && !board->sg_display_->IsMeasuring()) {
+                        if (lvgl_port_lock(200)) {
+                            board->sg_display_->TriggerMeasurement();
+                            lvgl_port_unlock();
+                            ESP_LOGI(TAG, "Auto-measure triggered (every 2 min)");
+                        }
+                    }
+                }
+                // AHT20 (Temp/Hum) — every 10s
+                if (board->aht20_ && board->tick_counter_ % 10 == 0) {
+                    board->aht20_->Measure();
+                }
+
                 // Dew heater auto mode — check every 30s
                 if (board->dew_mode_ == 2 && board->dew_gpio_ >= 0 && board->tick_counter_ % 30 == 15) {
                     if (board->aht20_) {
@@ -3013,6 +3384,7 @@ public:
         InitializeButtons();
 
         // === SkyGuard-specific init ===
+        InitReadingCache();
         InitializeSensorI2c();
         InitializeSensors();
         InitializeGps();

@@ -173,6 +173,7 @@ private:
     // Bottom bar: location
     lv_obj_t* dash_bottom_bar_ = nullptr;   // Rounded container
     lv_obj_t* dash_location_ = nullptr;     // "Asti, IT"
+    lv_obj_t* dash_sensor_status_ = nullptr; // Sensor status icons
     bool dash_built_ = false;
     char location_name_[64] = {};           // Reverse geocoded address
     void BuildDashboard();
@@ -296,11 +297,13 @@ private:
     IndiStatus indi_status_;
     std::string indi_url_;
 
-    // Control page — touch buttons for telescope commands
+    // Control page — scrollable button list for all commands
     ControlCallback ctrl_cb_ = nullptr;
     void* ctrl_ctx_ = nullptr;
-    static constexpr int CTRL_BTN_COUNT = 8;
-    lv_obj_t* ctrl_btns_[CTRL_BTN_COUNT] = {};
+    static constexpr int CTRL_BTN_MAX = 24;
+    lv_obj_t* ctrl_btns_[CTRL_BTN_MAX] = {};
+    lv_obj_t* ctrl_scroll_container_ = nullptr;
+    int ctrl_btn_count_ = 0;
     bool ctrl_built_ = false;
     void HideControlBtns();
     void ShowControlBtns();

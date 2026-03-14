@@ -124,8 +124,16 @@ void SkyGuardWeather::DoFetch() {
         return;
     }
 
+    ESP_LOGI(TAG, "Fetching weather: lat=%.4f lon=%.4f", lat_, lon_);
     if (!SkyGuardHttp::Get(url, buf, buf_size)) {
-        ESP_LOGE(TAG, "Weather fetch failed");
+        // Log first 200 chars of response for debugging (may contain error message)
+        if (buf[0]) {
+            buf[200] = '\0';
+            ESP_LOGE(TAG, "Weather fetch failed. Response: %s", buf);
+        } else {
+            ESP_LOGE(TAG, "Weather fetch failed (no response)");
+        }
+        // Keep existing cached data — don't clear
         free(buf);
         return;
     }
