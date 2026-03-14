@@ -2464,12 +2464,8 @@ void SkyGuardDisplay::BuildPageControl() {
             lv_obj_add_event_cb(btn, [](lv_event_t* e) {
                 lv_event_stop_bubbling(e);
                 auto* cbd = (CtrlBtnData*)lv_event_get_user_data(e);
-                if (cbd && cbd->disp && cbd->disp->ctrl_cb_) {
-                    ESP_LOGI("CTRL", "Button %d: %s %s", cbd->idx,
-                             kCtrlButtons[cbd->idx].command, kCtrlButtons[cbd->idx].param);
-                    cbd->disp->ctrl_cb_(cbd->disp->ctrl_ctx_,
-                                        kCtrlButtons[cbd->idx].command,
-                                        kCtrlButtons[cbd->idx].param);
+                if (cbd && cbd->disp) {
+                    cbd->disp->ShowConfirmDialog(cbd->idx);
                 }
             }, LV_EVENT_CLICKED, cbd);
 
@@ -2478,6 +2474,89 @@ void SkyGuardDisplay::BuildPageControl() {
         ctrl_built_ = true;
     }
     ShowControlBtns();
+}
+
+void SkyGuardDisplay::ShowConfirmDialog(int btn_idx) {
+    if (btn_idx < 0 || btn_idx >= kCtrlButtonCount) return;
+    DismissConfirmDialog();  // Remove any existing
+
+    confirm_pending_idx_ = btn_idx;
+
+    // Dark semi-transparent backdrop on overlay
+    confirm_box_ = lv_obj_create(overlay_);
+    lv_obj_set_size(confirm_box_, 280, 120);
+    lv_obj_center(confirm_box_);
+    lv_obj_set_style_bg_color(confirm_box_, lv_color_hex(0x1a1a2e), 0);
+    lv_obj_set_style_bg_opa(confirm_box_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(confirm_box_, lv_color_hex(0x4488ff), 0);
+    lv_obj_set_style_border_width(confirm_box_, 2, 0);
+    lv_obj_set_style_radius(confirm_box_, 12, 0);
+    lv_obj_set_style_pad_all(confirm_box_, 12, 0);
+    lv_obj_remove_flag(confirm_box_, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Title: "Conferma"
+    lv_obj_t* title = lv_label_create(confirm_box_);
+    lv_label_set_text(title, "CONFERMA");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x4488ff), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    // Action label
+    lv_obj_t* msg = lv_label_create(confirm_box_);
+    char msg_buf[64];
+    snprintf(msg_buf, sizeof(msg_buf), "%s?", kCtrlButtons[btn_idx].label);
+    lv_label_set_text(msg, msg_buf);
+    lv_obj_set_style_text_color(msg, lv_color_hex(0xe0e0e0), 0);
+    lv_obj_set_style_text_font(msg, &lv_font_montserrat_14, 0);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 22);
+
+    // OK button
+    lv_obj_t* btn_ok = lv_button_create(confirm_box_);
+    lv_obj_set_size(btn_ok, 100, 36);
+    lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_LEFT, 10, -4);
+    lv_obj_set_style_bg_color(btn_ok, lv_color_hex(0x238636), 0);
+    lv_obj_set_style_radius(btn_ok, 6, 0);
+    lv_obj_t* lbl_ok = lv_label_create(btn_ok);
+    lv_label_set_text(lbl_ok, "OK");
+    lv_obj_set_style_text_color(lbl_ok, lv_color_white(), 0);
+    lv_obj_center(lbl_ok);
+
+    lv_obj_add_event_cb(btn_ok, [](lv_event_t* e) {
+        auto* disp = (SkyGuardDisplay*)lv_event_get_user_data(e);
+        int idx = disp->confirm_pending_idx_;
+        if (idx >= 0 && idx < kCtrlButtonCount && disp->ctrl_cb_) {
+            ESP_LOGI("CTRL", "Confirmed button %d: %s %s", idx,
+                     kCtrlButtons[idx].command, kCtrlButtons[idx].param);
+            disp->ctrl_cb_(disp->ctrl_ctx_,
+                           kCtrlButtons[idx].command,
+                           kCtrlButtons[idx].param);
+        }
+        disp->DismissConfirmDialog();
+    }, LV_EVENT_CLICKED, this);
+
+    // Cancel button
+    lv_obj_t* btn_cancel = lv_button_create(confirm_box_);
+    lv_obj_set_size(btn_cancel, 100, 36);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, -10, -4);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x6e4040), 0);
+    lv_obj_set_style_radius(btn_cancel, 6, 0);
+    lv_obj_t* lbl_cancel = lv_label_create(btn_cancel);
+    lv_label_set_text(lbl_cancel, "Annulla");
+    lv_obj_set_style_text_color(lbl_cancel, lv_color_white(), 0);
+    lv_obj_center(lbl_cancel);
+
+    lv_obj_add_event_cb(btn_cancel, [](lv_event_t* e) {
+        auto* disp = (SkyGuardDisplay*)lv_event_get_user_data(e);
+        disp->DismissConfirmDialog();
+    }, LV_EVENT_CLICKED, this);
+}
+
+void SkyGuardDisplay::DismissConfirmDialog() {
+    if (confirm_box_) {
+        lv_obj_delete(confirm_box_);
+        confirm_box_ = nullptr;
+    }
+    confirm_pending_idx_ = -1;
 }
 
 void SkyGuardDisplay::BuildPageEnvironment() {

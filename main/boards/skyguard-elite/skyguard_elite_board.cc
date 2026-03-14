@@ -102,6 +102,49 @@ private:
     uint32_t ai_idle_counter_ = 0;    // Seconds since AI went idle after speaking
     bool ai_was_active_ = false;       // Track previous AI state for edge detection
 
+    // Centralized resolved position — ONE source of truth
+    // Priority: GPS module → Google WiFi API → NVS fallback (from WebUI config)
+    float pos_lat_ = 44.9019f;   // Default: Asti
+    float pos_lon_ = 8.1662f;
+    float pos_alt_ = 0.0f;
+    int pos_gps_sats_ = 0;
+    float pos_gps_hdop_ = 99.9f;
+    const char* pos_source_ = "nvs";  // "gps", "wifi_google", "nvs"
+
+    void UpdatePosition() {
+        // 1. GPS module (highest priority)
+        if (gps_ && gps_->HasFix()) {
+            pos_lat_ = gps_->GetLatitude();
+            pos_lon_ = gps_->GetLongitude();
+            pos_alt_ = gps_->GetAltitude();
+            pos_gps_sats_ = gps_->GetSatellites();
+            pos_gps_hdop_ = gps_->GetHdop();
+            pos_source_ = "gps";
+            return;
+        }
+        // 2. Google WiFi API (only if resolved and NOT ip-based)
+        if (wifi_geo_) {
+            const auto& loc = wifi_geo_->GetLocation();
+            if (loc.valid && strcmp(loc.source, "wifi_google") == 0) {
+                pos_lat_ = loc.latitude;
+                pos_lon_ = loc.longitude;
+                pos_alt_ = 0;
+                pos_gps_sats_ = 0;
+                pos_gps_hdop_ = 99.9f;
+                pos_source_ = "wifi_google";
+                return;
+            }
+        }
+        // 3. NVS fallback (WebUI-configured coordinates, works offline)
+        Settings sg_pos("skyguard", false);
+        pos_lat_ = std::strtof(sg_pos.GetString("fallback_lat", "44.9019").c_str(), nullptr);
+        pos_lon_ = std::strtof(sg_pos.GetString("fallback_lon", "8.1662").c_str(), nullptr);
+        pos_alt_ = 0;
+        pos_gps_sats_ = gps_ ? gps_->GetSatellites() : 0;
+        pos_gps_hdop_ = 99.9f;
+        pos_source_ = "nvs";
+    }
+
     // Calibration (loaded from NVS at init)
     float temp_offset_ = -2.4f;
     float hum_offset_ = 0.0f;
@@ -631,11 +674,15 @@ private:
                 google_api_key_ = google_key;
                 ESP_LOGI(TAG, "Google Geolocation API key loaded (len=%d)", (int)google_key.size());
             } else {
-                ESP_LOGW(TAG, "No Google API key — WiFi geolocation disabled, using IP/fallback");
+                ESP_LOGW(TAG, "No Google API key — WiFi geolocation disabled, using NVS fallback");
             }
         }
-        wifi_geo_->SetFallbackLocation(44.9019f, 8.1662f);  // Asti default
-        ESP_LOGI(TAG, "WiFi geolocation fallback initialized");
+        // Set WiFi geolocation fallback from NVS (WebUI-configured coords)
+        Settings fb_pos("skyguard", false);
+        float fb_lat = std::strtof(fb_pos.GetString("fallback_lat", "44.9019").c_str(), nullptr);
+        float fb_lon = std::strtof(fb_pos.GetString("fallback_lon", "8.1662").c_str(), nullptr);
+        wifi_geo_->SetFallbackLocation(fb_lat, fb_lon);
+        ESP_LOGI(TAG, "WiFi geolocation NVS fallback: %.4f, %.4f", fb_lat, fb_lon);
     }
 
     void InitializeButtons() {
@@ -770,43 +817,29 @@ private:
             "Posizione GPS con fallback WiFi/IP: lat, lon, altitudine, ora UTC, tempo siderale, sorgente",
             PropertyList(),
             [this](const PropertyList& props) -> ReturnValue {
-                // Try GPS first (highest accuracy)
+                UpdatePosition();
+                char buf[320];
                 if (gps_ && gps_->HasFix()) {
-                    char buf[320];
                     snprintf(buf, sizeof(buf),
                         "Lat=%.6f, Lon=%.6f, Alt=%.1fm, "
                         "Sats=%d, HDOP=%.1f, "
                         "UTC=%04d-%02d-%02d %02d:%02d:%02d, "
                         "JD=%.4f, LST=%.2fh, "
                         "Source=gps",
-                        gps_->GetLatitude(), gps_->GetLongitude(), gps_->GetAltitude(),
-                        gps_->GetSatellites(), gps_->GetHdop(),
+                        pos_lat_, pos_lon_, pos_alt_,
+                        pos_gps_sats_, pos_gps_hdop_,
                         gps_->GetYear(), gps_->GetMonth(), gps_->GetDay(),
                         gps_->GetHour(), gps_->GetMinute(), gps_->GetSecond(),
                         gps_->GetJulianDate(), gps_->GetLST());
-                    return std::string(buf);
-                }
-
-                // GPS has no fix — try WiFi geolocation fallback chain
-                int sats = gps_ ? gps_->GetSatellites() : 0;
-                ESP_LOGW(TAG, "GPS no fix (sats=%d), trying geolocation fallback...", sats);
-
-                if (wifi_geo_ && wifi_geo_->ResolveFallback()) {
-                    const auto& loc = wifi_geo_->GetLocation();
-                    char buf[320];
+                } else {
                     snprintf(buf, sizeof(buf),
-                        "Lat=%.6f, Lon=%.6f, Alt=0.0m, "
-                        "Accuracy=%.0fm, "
+                        "Lat=%.6f, Lon=%.6f, Alt=%.1fm, "
                         "GPS_sats=%d (no fix), "
                         "Source=%s",
-                        loc.latitude, loc.longitude,
-                        loc.accuracy,
-                        sats,
-                        loc.source);
-                    return std::string(buf);
+                        pos_lat_, pos_lon_, pos_alt_,
+                        pos_gps_sats_, pos_source_);
                 }
-
-                return false; //"No position available (GPS no fix, all fallbacks failed)");
+                return std::string(buf);
             });
 
         // --- device.geo.configure ---
@@ -1690,43 +1723,18 @@ private:
             cJSON_AddNumberToObject(root, "aht", 0);
         }
 
-        // --- GPS ---
-        if (board->gps_) {
-            bool fix = board->gps_->HasFix();
-            cJSON_AddBoolToObject(root, "gps_ok", fix);
-            if (fix) {
-                cJSON_AddNumberToObject(root, "lat", board->gps_->GetLatitude());
-                cJSON_AddNumberToObject(root, "lon", board->gps_->GetLongitude());
-                cJSON_AddNumberToObject(root, "gps_alt", board->gps_->GetAltitude());
-                cJSON_AddNumberToObject(root, "gps_sats", board->gps_->GetSatellites());
-                cJSON_AddStringToObject(root, "gps_source", "GPS");
-            } else {
-                // Use fallback position from display
-                float fb_lat = 0, fb_lon = 0;
-                if (board->sg_display_ && board->sg_display_->HasPosition(fb_lat, fb_lon)) {
-                    cJSON_AddNumberToObject(root, "lat", fb_lat);
-                    cJSON_AddNumberToObject(root, "lon", fb_lon);
-                    cJSON_AddNumberToObject(root, "gps_alt", 0);
-                    cJSON_AddNumberToObject(root, "gps_sats", 0);
-                    cJSON_AddStringToObject(root, "gps_source", "Fallback");
-                }
-            }
-        } else {
-            cJSON_AddBoolToObject(root, "gps_ok", false);
-        }
+        // --- GPS / Position (centralized) ---
+        board->UpdatePosition();
+        cJSON_AddBoolToObject(root, "gps_ok", board->gps_ && board->gps_->HasFix());
+        cJSON_AddNumberToObject(root, "lat", board->pos_lat_);
+        cJSON_AddNumberToObject(root, "lon", board->pos_lon_);
+        cJSON_AddNumberToObject(root, "gps_alt", board->pos_alt_);
+        cJSON_AddNumberToObject(root, "gps_sats", board->pos_gps_sats_);
+        cJSON_AddStringToObject(root, "gps_source", board->pos_source_);
 
-        // --- Moon & Twilight (computed from position + time) ---
-        float lat = 0, lon = 0;
-        bool has_pos = false;
-        if (board->gps_ && board->gps_->HasFix()) {
-            lat = board->gps_->GetLatitude();
-            lon = board->gps_->GetLongitude();
-            has_pos = true;
-        } else if (board->sg_display_) {
-            has_pos = board->sg_display_->HasPosition(lat, lon);
-        }
-
-        if (has_pos) {
+        // --- Moon & Twilight (computed from centralized position) ---
+        float lat = board->pos_lat_, lon = board->pos_lon_;
+        {
             double jd = board->sg_display_ ? board->sg_display_->GetCurrentJD() : 2460000.0;
             double jd0 = board->sg_display_ ? board->sg_display_->GetCurrentJD0() : jd;
 
@@ -1992,19 +2000,12 @@ private:
             ESP_LOGI(TAG, "N2YO API key loaded (len=%d)", (int)n2yo_key.size());
         }
 
-        // Set location from GPS or static fallback (Asti)
-        // WiFi geolocation will be tried later from timer when WiFi is connected
-        float lat = 44.9019f, lon = 8.1662f, alt = 0;
-        if (gps_ && gps_->HasFix()) {
-            lat = gps_->GetLatitude();
-            lon = gps_->GetLongitude();
-            alt = gps_->GetAltitude();
-            ESP_LOGI(TAG, "Initial position from GPS");
-        } else {
-            ESP_LOGW(TAG, "No GPS fix at boot — using Asti fallback, WiFi geo later");
-        }
-        weather_->SetLocation(lat, lon);
-        sky_tracker_->SetLocation(lat, lon, alt);
+        // Set initial location from centralized resolver (GPS → NVS)
+        // WiFi Google geolocation will be tried later from timer when WiFi connects
+        UpdatePosition();
+        weather_->SetLocation(pos_lat_, pos_lon_);
+        sky_tracker_->SetLocation(pos_lat_, pos_lon_, pos_alt_);
+        ESP_LOGI(TAG, "Initial position: %s (%.4f, %.4f)", pos_source_, pos_lat_, pos_lon_);
 
         // WebUI — created here, started later when WiFi connects (from timer tick)
         webui_ = new SkyGuardWebUI();
@@ -2045,7 +2046,7 @@ private:
             ESP_LOGI(TAG, "Dew heater GPIO=%d, threshold=%.1f°C", dew_gpio_, dew_threshold_);
         }
 
-        ESP_LOGI(TAG, "Network services initialized (lat=%.4f, lon=%.4f)", lat, lon);
+        ESP_LOGI(TAG, "Network services initialized (lat=%.4f, lon=%.4f, src=%s)", pos_lat_, pos_lon_, pos_source_);
     }
 
     bool sg_setup_done_ = false;
@@ -2499,44 +2500,12 @@ private:
         Settings sg_priv("skyguard", false);
         bool privacy_enabled = (sg_priv.GetString("sqm_privacy", "0") == "1");
 
-        // Get position
-        float lat = 44.9019f, lon = 8.1662f, alt = 0;
-        int gps_sats = 0;
-        float gps_hdop = 99.9f;
-
-        if (gps_ && gps_->HasFix()) {
-            lat = gps_->GetLatitude();
-            lon = gps_->GetLongitude();
-            alt = gps_->GetAltitude();
-            gps_sats = gps_->GetSatellites();
-            gps_hdop = gps_->GetHdop();
-            ESP_LOGI(TAG, "SQM POST position: GPS fix (%.4f, %.4f)", lat, lon);
-        } else if (wifi_geo_ && wifi_geo_->GetLocation().valid) {
-            const auto& loc = wifi_geo_->GetLocation();
-            // IP geolocation is very inaccurate (~5km, often wrong city)
-            // Prefer NVS fallback coordinates which are user-configured
-            if (strcmp(loc.source, "ip") == 0) {
-                Settings sg_pos("skyguard", false);
-                std::string fb_lat = sg_pos.GetString("fallback_lat", "44.9019");
-                std::string fb_lon = sg_pos.GetString("fallback_lon", "8.1662");
-                lat = std::strtof(fb_lat.c_str(), nullptr);
-                lon = std::strtof(fb_lon.c_str(), nullptr);
-                ESP_LOGI(TAG, "SQM POST position: NVS fallback (%.4f, %.4f) — IP geo too inaccurate", lat, lon);
-            } else {
-                // WiFi Google or static fallback — accurate enough
-                lat = loc.latitude;
-                lon = loc.longitude;
-                ESP_LOGI(TAG, "SQM POST position: %s (%.4f, %.4f)", loc.source, lat, lon);
-            }
-        } else {
-            // No geolocation resolved at all — use NVS fallback
-            Settings sg_pos("skyguard", false);
-            std::string fb_lat = sg_pos.GetString("fallback_lat", "44.9019");
-            std::string fb_lon = sg_pos.GetString("fallback_lon", "8.1662");
-            lat = std::strtof(fb_lat.c_str(), nullptr);
-            lon = std::strtof(fb_lon.c_str(), nullptr);
-            ESP_LOGI(TAG, "SQM POST position: NVS fallback (%.4f, %.4f) — no geo", lat, lon);
-        }
+        // Use centralized position (updated by timer: GPS → WiFi Google → NVS)
+        UpdatePosition();
+        float lat = pos_lat_, lon = pos_lon_, alt = pos_alt_;
+        int gps_sats = pos_gps_sats_;
+        float gps_hdop = pos_gps_hdop_;
+        ESP_LOGI(TAG, "SQM POST position: %s (%.4f, %.4f)", pos_source_, lat, lon);
 
         // Astro calculations
         double jd = sg_display_ ? sg_display_->GetCurrentJD() : 2460384.5;
@@ -2960,12 +2929,12 @@ private:
             }, "sg_ctrl", 6144, cc, 2, nullptr);
         }, this);
 
-        // Set initial fallback position so Moon/GPS pages work before WiFi resolves
-        if (gps_ && gps_->HasFix()) {
-            sg_display_->SetFallbackPosition(gps_->GetLatitude(), gps_->GetLongitude(), "gps");
-        } else {
-            sg_display_->SetFallbackPosition(44.9019f, 8.1662f, "default");
-        }
+        // Set initial position from centralized resolver (GPS → NVS)
+        UpdatePosition();
+        sg_display_->SetFallbackPosition(pos_lat_, pos_lon_, pos_source_);
+        if (weather_) weather_->SetLocation(pos_lat_, pos_lon_);
+        if (sky_tracker_) sky_tracker_->SetLocation(pos_lat_, pos_lon_, pos_alt_);
+        ESP_LOGI(TAG, "Initial position: %s (%.4f, %.4f)", pos_source_, pos_lat_, pos_lon_);
 
         // Don't call Setup() here — LVGL screen not ready yet in constructor
         // Setup will be called on first timer tick
@@ -3134,39 +3103,36 @@ private:
                     }
                 }
 
-                // Update location for network services: GPS → WiFi Geo → Fallback
+                // Update centralized position every 60s: GPS → WiFi Google → NVS
                 if (board->tick_counter_ % 60 == 30) {
-                    float lat = 0, lon = 0, alt = 0;
-                    bool got_pos = false;
+                    const char* prev_source = board->pos_source_;
+                    board->UpdatePosition();
 
-                    // Try GPS first
-                    if (board->gps_ && board->gps_->HasFix()) {
-                        lat = board->gps_->GetLatitude();
-                        lon = board->gps_->GetLongitude();
-                        alt = board->gps_->GetAltitude();
-                        got_pos = true;
-                        ESP_LOGI(TAG, "Position from GPS: %.4f, %.4f", lat, lon);
-                    }
-                    // Fallback: WiFi/IP geolocation (every 5 min = tick % 300)
-                    else if (board->wifi_geo_ && board->tick_counter_ % 300 == 30) {
-                        ESP_LOGI(TAG, "GPS no fix — trying WiFi geolocation fallback");
+                    // Try WiFi Google fallback every 5 min if no GPS fix
+                    if (strcmp(board->pos_source_, "nvs") == 0 &&
+                        board->wifi_geo_ && board->tick_counter_ % 300 == 30) {
+                        ESP_LOGI(TAG, "No GPS fix — trying WiFi Google geolocation");
                         xTaskCreate([](void* arg) {
                             auto* board = (SkyGuardEliteBoard*)arg;
                             if (board->wifi_geo_->ResolveFallback()) {
-                                auto& loc = board->wifi_geo_->GetLocation();
-                                ESP_LOGI(TAG, "Position from %s: %.4f, %.4f (±%.0fm)",
-                                    loc.source, loc.latitude, loc.longitude, loc.accuracy);
-                                if (board->weather_) board->weather_->SetLocation(loc.latitude, loc.longitude);
-                                if (board->sky_tracker_) board->sky_tracker_->SetLocation(loc.latitude, loc.longitude, 0);
-                                if (board->sg_display_) board->sg_display_->SetFallbackPosition(loc.latitude, loc.longitude, loc.source);
+                                board->UpdatePosition();  // Re-evaluate after resolve
                             }
+                            // Propagate position to all consumers
+                            if (board->weather_) board->weather_->SetLocation(board->pos_lat_, board->pos_lon_);
+                            if (board->sky_tracker_) board->sky_tracker_->SetLocation(board->pos_lat_, board->pos_lon_, board->pos_alt_);
+                            if (board->sg_display_) board->sg_display_->SetFallbackPosition(board->pos_lat_, board->pos_lon_, board->pos_source_);
                             vTaskDelete(nullptr);
                         }, "sg_geoloc", 8192, board, 3, nullptr);
+                    } else {
+                        // Propagate to all consumers
+                        if (board->weather_) board->weather_->SetLocation(board->pos_lat_, board->pos_lon_);
+                        if (board->sky_tracker_) board->sky_tracker_->SetLocation(board->pos_lat_, board->pos_lon_, board->pos_alt_);
+                        if (board->sg_display_) board->sg_display_->SetFallbackPosition(board->pos_lat_, board->pos_lon_, board->pos_source_);
                     }
 
-                    if (got_pos) {
-                        if (board->weather_) board->weather_->SetLocation(lat, lon);
-                        if (board->sky_tracker_) board->sky_tracker_->SetLocation(lat, lon, alt);
+                    if (strcmp(board->pos_source_, prev_source) != 0) {
+                        ESP_LOGI(TAG, "Position source changed: %s → %s (%.4f, %.4f)",
+                                 prev_source, board->pos_source_, board->pos_lat_, board->pos_lon_);
                     }
                 }
 

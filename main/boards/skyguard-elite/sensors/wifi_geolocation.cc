@@ -166,30 +166,24 @@ bool WifiGeolocation::TryIpGeolocation() {
 }
 
 bool WifiGeolocation::ResolveFallback() {
-    // Chain: WiFi Google → IP → Static fallback
+    // Chain: WiFi Google → NVS fallback (NO IP geolocation — too inaccurate)
     ESP_LOGI(TAG, "Starting geolocation fallback chain...");
 
-    // 1. Try WiFi (most accurate, ~20-50m)
+    // 1. Try WiFi Google (accurate, ~20-50m)
     if (TryWifiGeolocation()) {
-        ESP_LOGI(TAG, "Resolved via WiFi Google (%s, accuracy=%.0fm)",
-                 location_.source, location_.accuracy);
+        ESP_LOGI(TAG, "Resolved via WiFi Google (%.6f, %.6f, accuracy=%.0fm)",
+                 location_.latitude, location_.longitude, location_.accuracy);
         return true;
     }
 
-    // 2. Try IP (less accurate, ~5km)
-    if (TryIpGeolocation()) {
-        ESP_LOGI(TAG, "Resolved via IP geolocation (%s)", location_.source);
-        return true;
-    }
-
-    // 3. Static fallback
-    ESP_LOGW(TAG, "All geolocation methods failed — using static fallback");
+    // 2. NVS fallback (WebUI-configured coordinates, works offline)
+    ESP_LOGW(TAG, "WiFi Google failed — using NVS fallback coordinates");
     location_.latitude = fallback_lat_;
     location_.longitude = fallback_lon_;
-    location_.accuracy = 10000.0f;
-    location_.source = "fallback";
+    location_.accuracy = 0.0f;  // User-configured, accuracy unknown
+    location_.source = "nvs";
     location_.valid = true;
-    return true;  // Always "succeeds" with fallback
+    return true;  // Always "succeeds" with NVS fallback
 }
 
 bool WifiGeolocation::HttpPost(const char* url, const char* body, char* response, int max_len) {

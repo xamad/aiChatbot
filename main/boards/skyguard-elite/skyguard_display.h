@@ -308,6 +308,12 @@ private:
     void HideControlBtns();
     void ShowControlBtns();
 
+    // Confirmation dialog for control buttons
+    lv_obj_t* confirm_box_ = nullptr;
+    int confirm_pending_idx_ = -1;  // Button index pending confirmation
+    void ShowConfirmDialog(int btn_idx);
+    void DismissConfirmDialog();
+
     // Environment page — card layout with arc gauges
     lv_obj_t* env_container_ = nullptr;      // Wrapper for hide/show
     lv_obj_t* env_left_card_ = nullptr;      // Temp+Hum arcs card
