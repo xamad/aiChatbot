@@ -3228,23 +3228,59 @@ void SkyGuardDisplay::UpdatePageSpectral() {
     lv_label_set_text(spectral_sqi_value_, lp_buf);
     lv_obj_set_style_text_color(spectral_sqi_value_, sqi_color, 0);
 
-    // LP source
-    snprintf(lp_buf, sizeof(lp_buf), "%s", as7341_->GetLpSourceName());
-    lv_label_set_text(spectral_lp_source_, lp_buf);
-    lv_color_t lp_color = SG_GOOD_COLOR;
-    if (lp == LP_LED) lp_color = SG_WARN_COLOR;
-    else if (lp == LP_HPS || lp == LP_MERCURY) lp_color = SG_BAD_COLOR;
-    else if (lp == LP_MIXED) lp_color = SG_WARN_COLOR;
-    lv_obj_set_style_text_color(spectral_lp_source_, lp_color, 0);
-
-    // Verdict label
+    // Context-aware labels based on ambient light level
+    float mpsas_check = tsl2591_ ? tsl2591_->GetMpsas() : 0;
+    lv_color_t lp_color;
     const char* verdict;
-    if (sqi >= 80) verdict = "Eccellente";
-    else if (sqi >= 60) verdict = "Buono";
-    else if (sqi >= 40) verdict = "Discreto";
-    else if (sqi >= 20) verdict = "Inquinato";
-    else verdict = "Molto Inquin.";
-    lv_label_set_text(spectral_lp_verdict_, verdict);
+
+    if (mpsas_check < 16.0f) {
+        // === DAYTIME / BRIGHT — atmospheric analysis mode ===
+        lv_label_set_text(spectral_sqi_label_, "Trasparenza");
+        // LP source → sky condition (Rayleigh scattering analysis)
+        lv_label_set_text(spectral_lp_source_, as7341_->GetSkyCondition());
+        int clarity = as7341_->GetAtmosphericClarity();
+        lp_color = (clarity >= 60) ? SG_GOOD_COLOR : (clarity >= 30) ? SG_WARN_COLOR : SG_BAD_COLOR;
+        lv_obj_set_style_text_color(spectral_lp_source_, lp_color, 0);
+
+        // SQI arc → atmospheric clarity %
+        lv_arc_set_value(spectral_sqi_arc_, clarity);
+        lv_obj_set_style_arc_color(spectral_sqi_arc_, lp_color, LV_PART_INDICATOR);
+        snprintf(lp_buf, sizeof(lp_buf), "%d%%", clarity);
+        lv_label_set_text(spectral_sqi_value_, lp_buf);
+        lv_obj_set_style_text_color(spectral_sqi_value_, lp_color, 0);
+
+        // Verdict → solar photography conditions
+        verdict = as7341_->GetSolarPhotoVerdict();
+        snprintf(lp_buf, sizeof(lp_buf), "Solare: %s", verdict);
+        lv_label_set_text(spectral_lp_verdict_, lp_buf);
+        sqi_color = (clarity >= 60) ? SG_GOOD_COLOR : (clarity >= 30) ? SG_WARN_COLOR : SG_BAD_COLOR;
+    } else {
+        // === NIGHTTIME — light pollution analysis mode ===
+        lv_label_set_text(spectral_sqi_label_, "Qualita Cielo");
+        // LP source label
+        snprintf(lp_buf, sizeof(lp_buf), "%s", as7341_->GetLpSourceName());
+        lv_label_set_text(spectral_lp_source_, lp_buf);
+        lp_color = SG_GOOD_COLOR;
+        if (lp == LP_LED) lp_color = SG_WARN_COLOR;
+        else if (lp == LP_HPS || lp == LP_MERCURY) lp_color = SG_BAD_COLOR;
+        else if (lp == LP_MIXED) lp_color = SG_WARN_COLOR;
+        lv_obj_set_style_text_color(spectral_lp_source_, lp_color, 0);
+
+        // Verdict — SQI + MPSAS cross-reference
+        if (mpsas_check < 18.0f) {
+            if (sqi >= 60) verdict = "Discreto (urbano)";
+            else if (sqi >= 30) verdict = "Inquinato";
+            else verdict = "Molto inquinato";
+            sqi_color = (sqi >= 60) ? SG_WARN_COLOR : SG_BAD_COLOR;
+        } else {
+            if (sqi >= 80) verdict = "Eccellente";
+            else if (sqi >= 60) verdict = "Buono";
+            else if (sqi >= 40) verdict = "Discreto";
+            else if (sqi >= 20) verdict = "Inquinato";
+            else verdict = "Molto inquinato";
+        }
+        lv_label_set_text(spectral_lp_verdict_, verdict);
+    }
     lv_obj_set_style_text_color(spectral_lp_verdict_, sqi_color, 0);
 }
 

@@ -250,6 +250,50 @@ void As7341Device::AnalyzeLightPollution() {
     }
 }
 
+// --- Daytime atmospheric analysis ---
+// Clear sky has strong Rayleigh scattering: blue >> red
+// Overcast sky scatters uniformly: blue ≈ red
+// Haze/aerosols scatter blue away: red >> blue
+
+int As7341Device::GetAtmosphericClarity() const {
+    float blue_sum = (float)(reading_.f1_415nm + reading_.f2_445nm + reading_.f3_480nm);
+    float red_sum = (float)(reading_.f7_630nm + reading_.f8_680nm);
+    if (red_sum < 1.0f) return 0;
+
+    float ratio = blue_sum / red_sum;
+    // Typical values: clear sky ≈ 2.5-4.0, overcast ≈ 0.8-1.2, haze ≈ 0.5-0.8
+    // Map ratio 0.5-3.5 → 0-100%
+    int clarity = std::clamp((int)((ratio - 0.5f) / 3.0f * 100.0f), 0, 100);
+    return clarity;
+}
+
+const char* As7341Device::GetSkyCondition() const {
+    float blue_sum = (float)(reading_.f1_415nm + reading_.f2_445nm + reading_.f3_480nm);
+    float red_sum = (float)(reading_.f7_630nm + reading_.f8_680nm);
+    if (red_sum < 1.0f) return "N/D";
+
+    float ratio = blue_sum / red_sum;
+    float nir_ratio = (reading_.clear > 0) ? (float)reading_.nir / (float)reading_.clear : 0;
+
+    // NIR/Clear high + low blue/red = haze/aerosols
+    if (ratio < 0.8f || nir_ratio > 0.6f) return "Foschia";
+    if (ratio < 1.2f) return "Coperto";
+    if (ratio < 1.8f) return "Poco nuvoloso";
+    if (ratio < 2.5f) return "Parz. sereno";
+    return "Sereno";
+}
+
+const char* As7341Device::GetSolarPhotoVerdict() const {
+    int clarity = GetAtmosphericClarity();
+    float nir_ratio = (reading_.clear > 0) ? (float)reading_.nir / (float)reading_.clear : 0;
+
+    // Solar photography needs clear sky, low aerosols
+    if (clarity >= 70 && nir_ratio < 0.4f) return "Eccellente";
+    if (clarity >= 50) return "Buono";
+    if (clarity >= 30) return "Mediocre";
+    return "Scadente";
+}
+
 const char* As7341Device::GetLpSourceName() const {
     switch (lp_source_) {
         case LP_NATURAL: return "Naturale";

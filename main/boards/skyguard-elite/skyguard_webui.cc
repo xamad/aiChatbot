@@ -37,7 +37,7 @@ body{font-family:-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;min-h
 .card h3 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 .row{display:flex;justify-content:space-between;padding:3px 0;font-size:.82em}
 .row .k{color:#8b949e}.row .v{color:#e0e0e0;font-weight:500}
-.v.good{color:#00dd66}.v.warn{color:#ffbb00}.v.bad{color:#ff3333}.v.info{color:#55aaff}
+.v.good{color:#00dd66}.v.warn{color:#ffbb00}.v.bad{color:#ff3333}.v.info{color:#55aaff}.v.dim{color:#667788}
 .wx-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center;font-size:.75em}
 .wx-daily{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center;font-size:.75em;margin-top:8px;padding-top:8px;border-top:1px solid #21262d}
 .wx-col{background:#0d1117;border-radius:4px;padding:6px 2px}
@@ -93,10 +93,11 @@ footer{text-align:center;color:#30363d;font-size:.65em;padding:12px}
 <div class="row"><span class="k">IR</span><span class="v" id="d_ir">--</span></div>
 </div>
 
-<div class="card"><h3><span class="dot" style="background:#7700ee"></span>SPETTRO / LP</h3>
+<div class="card"><h3><span class="dot" style="background:#7700ee"></span><span id="d_spec_title">SPETTRO / LP</span></h3>
 <div id="d_spectral" style="display:flex;gap:2px;height:60px;align-items:flex-end;margin:8px 0"></div>
-<div class="row"><span class="k">Sorgente LP</span><span class="v" id="d_lp_src">--</span></div>
-<div class="row"><span class="k">SQI</span><span class="v" id="d_sqi">--</span></div>
+<div class="row"><span class="k" id="d_lp_label">Sorgente LP</span><span class="v" id="d_lp_src">--</span></div>
+<div class="row"><span class="k" id="d_sqi_label">SQI</span><span class="v" id="d_sqi">--</span></div>
+<div class="row"><span class="k" id="d_sv_label">Verdetto</span><span class="v" id="d_spectral_verdict">--</span></div>
 </div>
 
 <div class="card"><h3><span class="dot" style="background:#cccc88"></span>LUNA & NOTTE</h3>
@@ -457,8 +458,31 @@ h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;jus
 <div style="width:80%;height:${pct}%;background:${c[i]};border-radius:2px;min-height:3px"></div>
 <div style="font-size:.55em;color:#556677;margin-top:2px">${n[i]}</div></div>`});
 document.getElementById('d_spectral').innerHTML=h}
-if(d.lp_source)document.getElementById('d_lp_src').textContent=d.lp_source;
-if(d.sqi!==undefined)document.getElementById('d_sqi').textContent=d.sqi+'%';
+// Context-aware spectral labels (daytime=atmosphere, night=LP)
+if(d.is_daytime){
+document.getElementById('d_spec_title').textContent='ATMOSFERA';
+document.getElementById('d_lp_label').textContent='Cielo';
+document.getElementById('d_sqi_label').textContent='Trasparenza';
+document.getElementById('d_sv_label').textContent='Foto Solare';
+if(d.lp_source){const el=document.getElementById('d_lp_src');el.textContent=d.lp_source;
+const sky=d.lp_source;el.className='v '+(sky.includes('Sereno')?'good':sky.includes('Poco')||sky.includes('Parz')?'warn':'bad')}
+if(d.atm_clarity!==undefined){const el=document.getElementById('d_sqi');el.textContent=d.atm_clarity+'%';
+el.className='v '+(d.atm_clarity>=60?'good':d.atm_clarity>=30?'warn':'bad')}
+if(d.spectral_verdict){const el=document.getElementById('d_spectral_verdict');el.textContent=d.spectral_verdict;
+el.className='v '+(d.spectral_verdict.includes('Eccellente')?'good':d.spectral_verdict.includes('Buono')?'warn':'bad')}
+}else{
+document.getElementById('d_spec_title').textContent='SPETTRO / LP';
+document.getElementById('d_lp_label').textContent='Sorgente LP';
+document.getElementById('d_sqi_label').textContent='SQI';
+document.getElementById('d_sv_label').textContent='Verdetto';
+if(d.lp_source){const el=document.getElementById('d_lp_src');el.textContent=d.lp_source;
+el.className='v '+(d.lp_source.includes('Naturale')?'good':d.lp_source.includes('LED')||d.lp_source.includes('Misto')?'warn':'bad')}
+if(d.sqi!==undefined){const el=document.getElementById('d_sqi');el.textContent=d.sqi+'%';
+el.className='v '+(d.sqi>=70?'good':d.sqi>=40?'warn':'bad')}
+if(d.spectral_verdict){const el=document.getElementById('d_spectral_verdict');el.textContent=d.spectral_verdict;
+el.className='v '+(d.spectral_verdict.includes('Eccellente')||d.spectral_verdict.includes('Buono')?'good':
+d.spectral_verdict.includes('Discreto')?'warn':'bad')}
+}
 // Moon
 if(d.moon_phase)document.getElementById('d_moon_phase').textContent=d.moon_phase;
 if(d.moon_illum!==undefined){const el=document.getElementById('d_moon_illum');el.textContent=d.moon_illum.toFixed(0)+'%';

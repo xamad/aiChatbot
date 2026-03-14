@@ -77,6 +77,11 @@ public:
     float GetBlueRatio() const { return blue_ratio_; }
     float GetSodiumRatio() const { return sodium_ratio_; }
 
+    // Daytime atmospheric analysis (valid when ambient light is bright)
+    int GetAtmosphericClarity() const;          // 0-100% (Rayleigh blue/red ratio)
+    const char* GetSkyCondition() const;        // "Sereno", "Coperto", "Foschia", etc.
+    const char* GetSolarPhotoVerdict() const;    // "Eccellente", "Buono", "Mediocre", "Scadente"
+
 private:
     // LP detection thresholds
     static constexpr float LED_BLUE_THRESHOLD = 0.6f;

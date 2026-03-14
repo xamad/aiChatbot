@@ -1749,8 +1749,37 @@ private:
             cJSON_AddItemToArray(spec, cJSON_CreateNumber(r.f7_630nm));
             cJSON_AddItemToArray(spec, cJSON_CreateNumber(r.f8_680nm));
             cJSON_AddItemToObject(root, "spectral", spec);
-            cJSON_AddStringToObject(root, "lp_source", board->as7341_->GetLpSourceName());
-            cJSON_AddNumberToObject(root, "sqi", board->as7341_->GetSpectralQuality());
+            int sqi = board->as7341_->GetSpectralQuality();
+            cJSON_AddNumberToObject(root, "sqi", sqi);
+
+            // Context-aware analysis: daytime = atmosphere, nighttime = LP
+            float mpsas = board->tsl2591_ ? board->tsl2591_->GetMpsas() : 0;
+            cJSON_AddBoolToObject(root, "is_daytime", mpsas < 16.0f);
+
+            if (mpsas < 16.0f) {
+                // Daytime: atmospheric analysis
+                cJSON_AddStringToObject(root, "lp_source", board->as7341_->GetSkyCondition());
+                int clarity = board->as7341_->GetAtmosphericClarity();
+                cJSON_AddNumberToObject(root, "atm_clarity", clarity);
+                cJSON_AddStringToObject(root, "spectral_verdict",
+                    board->as7341_->GetSolarPhotoVerdict());
+            } else {
+                // Nighttime: light pollution analysis
+                cJSON_AddStringToObject(root, "lp_source", board->as7341_->GetLpSourceName());
+                const char* sv;
+                if (mpsas < 18.0f) {
+                    if (sqi >= 60) sv = "Discreto (urbano)";
+                    else if (sqi >= 30) sv = "Inquinato";
+                    else sv = "Molto inquinato";
+                } else {
+                    if (sqi >= 80) sv = "Eccellente";
+                    else if (sqi >= 60) sv = "Buono";
+                    else if (sqi >= 40) sv = "Discreto";
+                    else if (sqi >= 20) sv = "Inquinato";
+                    else sv = "Molto inquinato";
+                }
+                cJSON_AddStringToObject(root, "spectral_verdict", sv);
+            }
             cJSON_AddNumberToObject(root, "as7", 1);
         } else {
             cJSON_AddNumberToObject(root, "as7", 0);
