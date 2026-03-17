@@ -34,12 +34,13 @@ class SkyGuardSkyTracker;
  * Pages: SQM | Spectral+LP | Moon | Weather | Aircraft | Satellites | Env | GPS | Commands
  */
 
-// Page index — 9 pages total
+// Page index
 enum SkyGuardPage {
     PAGE_SQM = 0,        // Sky quality
     PAGE_SPECTRAL,       // Spectral bars + LP identification
     PAGE_MOON,           // Lunar phase + position
     PAGE_WEATHER,        // 6h forecast (OWM)
+    PAGE_WIND,           // Wind compass + forecast
     PAGE_AIRCRAFT,       // Nearby aircraft (OpenSky)
     PAGE_SATELLITES,     // Satellite passes (N2YO)
     PAGE_METEOSAT,       // Satellite imagery (EUMETSAT/cloud map)
@@ -49,7 +50,7 @@ enum SkyGuardPage {
     PAGE_ENVIRONMENT,    // Temp/humidity
     PAGE_GPS,            // GPS position
     PAGE_MEASURE,        // Commands (always last)
-    PAGE_COUNT           // = 13
+    PAGE_COUNT           // = 14
 };
 
 class SkyGuardDisplay {
@@ -122,6 +123,12 @@ public:
     bool IsNightMode() const { return night_mode_; }
     void SetVisible(bool visible);
     bool IsMeasuring() const { return measuring_; }
+
+    // Mic mute — persistent overlay button
+    using MicMuteCallback = void(*)(void* ctx, bool muted);
+    void SetMicMuteCallback(MicMuteCallback cb, void* ctx) { mic_mute_cb_ = cb; mic_mute_ctx_ = ctx; }
+    void ToggleMicMute();
+    bool IsMicMuted() const { return mic_muted_; }
 
     void ShowBootLoader();
     void HideBootLoader();
@@ -235,6 +242,28 @@ private:
 
     static void DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* desc);
 
+    // Wind page — compass rose + forecast table
+    lv_obj_t* wind_container_ = nullptr;
+    lv_obj_t* wind_compass_canvas_ = nullptr;    // Canvas for compass rose + arrow
+    uint8_t* wind_compass_buf_ = nullptr;
+    static constexpr int WIND_COMPASS_SIZE = 130;
+    lv_obj_t* wind_speed_lbl_ = nullptr;         // "23 km/h"
+    lv_obj_t* wind_dir_lbl_ = nullptr;           // "NNE 22°"
+    lv_obj_t* wind_gust_lbl_ = nullptr;          // "Raffiche 35"
+    lv_obj_t* wind_beaufort_lbl_ = nullptr;      // "Beaufort 4"
+    lv_obj_t* wind_forecast_[5] = {};            // 5 rows: time + speed + dir
+    lv_obj_t* wind_location_ = nullptr;          // Location footer
+    bool wind_built_ = false;
+    void HideWindPage();
+    void ShowWindPage();
+
+    // Mic mute overlay — always visible
+    lv_obj_t* mic_mute_btn_ = nullptr;           // Small button overlay
+    lv_obj_t* mic_mute_icon_ = nullptr;          // Icon label
+    bool mic_muted_ = false;
+    MicMuteCallback mic_mute_cb_ = nullptr;
+    void* mic_mute_ctx_ = nullptr;
+
     // Radar display for aircraft page
     lv_obj_t* radar_container_ = nullptr;     // Container for radar circle
     lv_obj_t* radar_bg_ = nullptr;            // Background circle
@@ -247,6 +276,7 @@ private:
     lv_obj_t* radar_info_lines_[4] = {};      // Info text right side
     lv_obj_t* radar_range_label_ = nullptr;   // Range label ("50km")
     lv_obj_t* radar_legend_ = nullptr;        // Color legend
+    lv_obj_t* radar_location_ = nullptr;      // Location footer
     bool radar_built_ = false;
 
     // Satellite sky dome
@@ -260,6 +290,7 @@ private:
     lv_obj_t* sat_labels_[6] = {};               // Satellite name labels
     lv_obj_t* sat_info_lines_[3] = {};           // Info text right side
     lv_obj_t* sat_legend_ = nullptr;              // Color legend
+    lv_obj_t* sat_location_ = nullptr;            // Location footer
     bool sat_dome_built_ = false;
     void HideSatDome();
     void ShowSatDome();
@@ -419,6 +450,7 @@ private:
     void BuildPageSpectral();
     void BuildPageMoon();
     void BuildPageWeather();
+    void BuildPageWind();
     void BuildPageAircraft();
     void BuildPageSatellites();
     void BuildPageMeteosat();
@@ -434,6 +466,7 @@ private:
     void UpdatePageSpectral();
     void UpdatePageMoon();
     void UpdatePageWeather();
+    void UpdatePageWind();
     void UpdatePageAircraft();
     void UpdatePageSatellites();
     void UpdatePageMeteosat();

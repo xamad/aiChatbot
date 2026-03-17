@@ -153,16 +153,16 @@ private:
             pos_source_ = "gps";
             return;
         }
-        // 2. Google WiFi API (only if resolved and NOT ip-based)
+        // 2. WiFi geolocation (Google API, IP fallback, any valid source)
         if (wifi_geo_) {
             const auto& loc = wifi_geo_->GetLocation();
-            if (loc.valid && strcmp(loc.source, "wifi_google") == 0) {
+            if (loc.valid && loc.latitude != 0 && loc.longitude != 0) {
                 pos_lat_ = loc.latitude;
                 pos_lon_ = loc.longitude;
                 pos_alt_ = 0;
                 pos_gps_sats_ = 0;
                 pos_gps_hdop_ = 99.9f;
-                pos_source_ = "wifi_google";
+                pos_source_ = loc.source;
                 return;
             }
         }
@@ -3115,6 +3115,17 @@ private:
                     // First tick: LVGL is ready now, do setup
                     ESP_LOGI(TAG, "LVGL ready — setting up SkyGuard pages");
                     board->sg_display_->Setup();
+
+                    // Wire mic mute button to audio codec
+                    board->sg_display_->SetMicMuteCallback([](void* ctx, bool muted) {
+                        auto* b = (SkyGuardEliteBoard*)ctx;
+                        AudioCodec* codec = b->GetAudioCodec();
+                        if (codec) {
+                            codec->EnableInput(!muted);
+                            ESP_LOGI("SkyGuard", "Mic %s via codec", muted ? "MUTED" : "UNMUTED");
+                        }
+                    }, board);
+
                     board->sg_display_->ShowBootLoader();
 
                     // Touch screen during AI conversation → exit chatbot

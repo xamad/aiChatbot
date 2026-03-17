@@ -1415,6 +1415,15 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_width(radar_legend_, w - 32);
         lv_obj_set_style_text_align(radar_legend_, LV_TEXT_ALIGN_CENTER, 0);
 
+        // Location footer
+        radar_location_ = lv_label_create(radar_container_);
+        lv_obj_set_style_text_font(radar_location_, GetTinyFont(), 0);
+        lv_obj_set_style_text_color(radar_location_, SG_DIM_COLOR, 0);
+        lv_label_set_text(radar_location_, LV_SYMBOL_GPS " --");
+        lv_obj_set_pos(radar_location_, 0, data_area_h - 22);
+        lv_obj_set_width(radar_location_, w - 32);
+        lv_obj_set_style_text_align(radar_location_, LV_TEXT_ALIGN_CENTER, 0);
+
         radar_built_ = true;
         lv_obj_add_flag(radar_container_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1541,6 +1550,15 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_pos(sat_legend_, 0, data_area_h - 34);
         lv_obj_set_width(sat_legend_, w - 32);
         lv_obj_set_style_text_align(sat_legend_, LV_TEXT_ALIGN_CENTER, 0);
+
+        // Location footer
+        sat_location_ = lv_label_create(sat_dome_container_);
+        lv_obj_set_style_text_font(sat_location_, GetTinyFont(), 0);
+        lv_obj_set_style_text_color(sat_location_, SG_DIM_COLOR, 0);
+        lv_label_set_text(sat_location_, LV_SYMBOL_GPS " --");
+        lv_obj_set_pos(sat_location_, 0, data_area_h - 22);
+        lv_obj_set_width(sat_location_, w - 32);
+        lv_obj_set_style_text_align(sat_location_, LV_TEXT_ALIGN_CENTER, 0);
 
         sat_dome_built_ = true;
         lv_obj_add_flag(sat_dome_container_, LV_OBJ_FLAG_HIDDEN);
@@ -1722,6 +1740,31 @@ void SkyGuardDisplay::Setup() {
         else if (dir == LV_DIR_RIGHT) self->PrevPage();
     }, LV_EVENT_GESTURE, this);
 
+    // =====================================================================
+    // MIC MUTE button — always visible overlay (top-right, below status bar)
+    // Created on screen (not overlay) so it stays visible during AI chat
+    // =====================================================================
+    mic_mute_btn_ = lv_obj_create(screen);
+    lv_obj_remove_style_all(mic_mute_btn_);
+    lv_obj_set_size(mic_mute_btn_, 32, 24);
+    lv_obj_set_pos(mic_mute_btn_, 286, 0);  // Top-right, inside status bar area
+    lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0x1A3366), 0);
+    lv_obj_set_style_bg_opa(mic_mute_btn_, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(mic_mute_btn_, 6, 0);
+    lv_obj_add_flag(mic_mute_btn_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(mic_mute_btn_, LV_OBJ_FLAG_SCROLLABLE);
+
+    mic_mute_icon_ = lv_label_create(mic_mute_btn_);
+    lv_label_set_text(mic_mute_icon_, LV_SYMBOL_VOLUME_MAX);
+    lv_obj_set_style_text_font(mic_mute_icon_, GetSmallFont(), 0);
+    lv_obj_set_style_text_color(mic_mute_icon_, lv_color_white(), 0);
+    lv_obj_center(mic_mute_icon_);
+
+    lv_obj_add_event_cb(mic_mute_btn_, [](lv_event_t* e) {
+        auto* self = (SkyGuardDisplay*)lv_event_get_user_data(e);
+        self->ToggleMicMute();
+    }, LV_EVENT_CLICKED, this);
+
     // Build initial page
     SetPage(PAGE_SQM);
 
@@ -1744,15 +1787,20 @@ void SkyGuardDisplay::DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* 
     lv_color_t bg = lv_color_hex(0x1A1A2E);
     lv_canvas_fill_bg(canvas, bg, LV_OPA_COVER);
 
-    // Detect rain/snow/thunder from description keywords
-    bool has_rain = false, has_snow = false, has_thunder = false;
-    if (desc) {
+    // Detect weather conditions from description keywords
+    bool has_rain = false, has_snow = false, has_thunder = false, is_clear = false;
+    if (desc && desc[0] != '\0') {
         has_rain = (strstr(desc, "piog") || strstr(desc, "rain") ||
                     strstr(desc, "shower") || strstr(desc, "drizzle"));
         has_snow = (strstr(desc, "neve") || strstr(desc, "snow") || strstr(desc, "sleet"));
         has_thunder = (strstr(desc, "temporale") || strstr(desc, "thunder"));
         if (has_thunder) has_rain = true;
+        // Detect clear/sunny from Italian OWM descriptions
+        is_clear = (strstr(desc, "sereno") || strstr(desc, "clear") ||
+                    strstr(desc, "sole") || strstr(desc, "sun"));
     }
+    // Override clouds threshold when description says it's clear
+    if (is_clear) clouds = 0;
 
     lv_color_t sun_core = lv_color_hex(0xFFDD00);
     lv_color_t sun_glow = lv_color_hex(0xFFAA00);
@@ -1807,7 +1855,7 @@ void SkyGuardDisplay::DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* 
             }
     };
 
-    if (clouds < 15 && !has_rain && !has_snow) {
+    if (clouds < 25 && !has_rain && !has_snow) {
         // ===== CLEAR SKY — bright sun with rays =====
         int cx = 16, cy = 14;
         // Glow halo
@@ -2202,6 +2250,7 @@ void SkyGuardDisplay::SetPage(SkyGuardPage page) {
         case PAGE_SPECTRAL:    BuildPageSpectral(); break;
         case PAGE_MOON:        BuildPageMoon(); break;
         case PAGE_WEATHER:     BuildPageWeather(); break;
+        case PAGE_WIND:        BuildPageWind(); break;
         case PAGE_AIRCRAFT:    BuildPageAircraft(); break;
         case PAGE_SATELLITES:  BuildPageSatellites(); break;
         case PAGE_METEOSAT:    BuildPageMeteosat(); break;
@@ -2241,6 +2290,7 @@ void SkyGuardDisplay::ClearDataArea() {
     HideDashboard();
     HideSpectralBars();
     HideWeatherBars();
+    HideWindPage();
     HideRadar();
     HideSatDome();
     HideMoonCanvas();
@@ -2906,6 +2956,7 @@ void SkyGuardDisplay::Update() {
         case PAGE_SPECTRAL:    UpdatePageSpectral(); break;
         case PAGE_MOON:        UpdatePageMoon(); break;
         case PAGE_WEATHER:     UpdatePageWeather(); break;
+        case PAGE_WIND:        UpdatePageWind(); break;
         case PAGE_AIRCRAFT:    UpdatePageAircraft(); break;
         case PAGE_SATELLITES:  UpdatePageSatellites(); break;
         case PAGE_METEOSAT:    UpdatePageMeteosat(); break;
@@ -2922,6 +2973,32 @@ void SkyGuardDisplay::Update() {
 // ==========================================================================
 // UPDATE HELPERS
 // ==========================================================================
+
+// Build compact location string for page footers (e.g. "GPS Asti" or "44.90N 8.17E")
+static void BuildLocationString(char* buf, int buflen,
+                                const char* location_name, SkyGuardWeather* weather,
+                                float fallback_lat, float fallback_lon, bool fallback_valid) {
+    if (location_name && location_name[0]) {
+        snprintf(buf, buflen, LV_SYMBOL_GPS " %s", location_name);
+    } else if (weather && weather->HasData()) {
+        ForecastData fc = weather->GetForecast();
+        if (fc.location[0]) {
+            snprintf(buf, buflen, LV_SYMBOL_GPS " %s", fc.location);
+        } else if (fallback_valid) {
+            snprintf(buf, buflen, LV_SYMBOL_GPS " %.2f%c %.2f%c",
+                fabsf(fallback_lat), fallback_lat >= 0 ? 'N' : 'S',
+                fabsf(fallback_lon), fallback_lon >= 0 ? 'E' : 'W');
+        } else {
+            snprintf(buf, buflen, LV_SYMBOL_GPS " --");
+        }
+    } else if (fallback_valid) {
+        snprintf(buf, buflen, LV_SYMBOL_GPS " %.2f%c %.2f%c",
+            fabsf(fallback_lat), fallback_lat >= 0 ? 'N' : 'S',
+            fabsf(fallback_lon), fallback_lon >= 0 ? 'E' : 'W');
+    } else {
+        snprintf(buf, buflen, LV_SYMBOL_GPS " --");
+    }
+}
 
 void SkyGuardDisplay::UpdatePageSqm() {
     UpdateDashboard();
@@ -3632,8 +3709,337 @@ void SkyGuardDisplay::UpdatePageWeather() {
     }
 }
 
+// ==========================================================================
+// WIND PAGE — Compass rose + speed + forecast table
+// ==========================================================================
+
+void SkyGuardDisplay::HideWindPage() {
+    if (wind_container_) lv_obj_add_flag(wind_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void SkyGuardDisplay::ShowWindPage() {
+    if (!wind_container_) {
+        // Create container
+        wind_container_ = lv_obj_create(data_area_);
+        lv_obj_set_size(wind_container_, 320, 195);
+        lv_obj_set_style_bg_opa(wind_container_, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(wind_container_, 0, 0);
+        lv_obj_set_style_pad_all(wind_container_, 0, 0);
+        lv_obj_align(wind_container_, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_clear_flag(wind_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+        // Left side: compass canvas (130x130)
+        int canvas_bytes = LV_CANVAS_BUF_SIZE(WIND_COMPASS_SIZE, WIND_COMPASS_SIZE, 16, LV_DRAW_BUF_STRIDE_ALIGN);
+        wind_compass_buf_ = (uint8_t*)heap_caps_malloc(canvas_bytes, MALLOC_CAP_SPIRAM);
+        if (wind_compass_buf_) {
+            wind_compass_canvas_ = lv_canvas_create(wind_container_);
+            lv_canvas_set_buffer(wind_compass_canvas_, wind_compass_buf_, WIND_COMPASS_SIZE, WIND_COMPASS_SIZE, LV_COLOR_FORMAT_RGB565);
+            lv_obj_set_pos(wind_compass_canvas_, 2, 4);
+        }
+
+        // Right side: labels
+        int rx = 140;
+        wind_dir_lbl_ = lv_label_create(wind_container_);
+        lv_obj_set_style_text_font(wind_dir_lbl_, GetMediumFont(), 0);
+        lv_obj_set_style_text_color(wind_dir_lbl_, SG_TITLE_COLOR, 0);
+        lv_obj_set_pos(wind_dir_lbl_, rx, 6);
+
+        wind_speed_lbl_ = lv_label_create(wind_container_);
+        lv_obj_set_style_text_font(wind_speed_lbl_, GetLargeFont(), 0);
+        lv_obj_set_style_text_color(wind_speed_lbl_, SG_VALUE_COLOR, 0);
+        lv_obj_set_pos(wind_speed_lbl_, rx, 30);
+
+        wind_gust_lbl_ = lv_label_create(wind_container_);
+        lv_obj_set_style_text_font(wind_gust_lbl_, GetSmallFont(), 0);
+        lv_obj_set_style_text_color(wind_gust_lbl_, SG_DIM_COLOR, 0);
+        lv_obj_set_pos(wind_gust_lbl_, rx, 62);
+
+        wind_beaufort_lbl_ = lv_label_create(wind_container_);
+        lv_obj_set_style_text_font(wind_beaufort_lbl_, GetSmallFont(), 0);
+        lv_obj_set_style_text_color(wind_beaufort_lbl_, SG_DIM_COLOR, 0);
+        lv_obj_set_pos(wind_beaufort_lbl_, rx, 80);
+
+        // Separator
+        lv_obj_t* sep = lv_obj_create(wind_container_);
+        lv_obj_set_size(sep, 290, 1);
+        lv_obj_set_style_bg_color(sep, SG_DIM_COLOR, 0);
+        lv_obj_set_style_bg_opa(sep, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(sep, 0, 0);
+        lv_obj_set_pos(sep, 15, 100);
+
+        // Header row
+        static const char* headers[] = {"Ora", "km/h", "Raff", "Dir"};
+        static const int hx[] = {18, 90, 155, 220};
+        for (int i = 0; i < 4; i++) {
+            lv_obj_t* h = lv_label_create(wind_container_);
+            lv_label_set_text(h, headers[i]);
+            lv_obj_set_style_text_font(h, GetTinyFont(), 0);
+            lv_obj_set_style_text_color(h, SG_DIM_COLOR, 0);
+            lv_obj_set_pos(h, hx[i], 105);
+        }
+
+        // Forecast rows (5 entries)
+        for (int i = 0; i < 5; i++) {
+            wind_forecast_[i] = lv_label_create(wind_container_);
+            lv_obj_set_style_text_font(wind_forecast_[i], GetSmallFont(), 0);
+            lv_obj_set_style_text_color(wind_forecast_[i], SG_TEXT_COLOR, 0);
+            lv_obj_set_pos(wind_forecast_[i], 18, 118 + i * 15);
+            lv_label_set_text(wind_forecast_[i], "");
+        }
+
+        // Location footer
+        wind_location_ = lv_label_create(wind_container_);
+        lv_obj_set_style_text_font(wind_location_, GetTinyFont(), 0);
+        lv_obj_set_style_text_color(wind_location_, SG_DIM_COLOR, 0);
+        lv_label_set_text(wind_location_, LV_SYMBOL_GPS " --");
+        lv_obj_set_pos(wind_location_, 140, 80 + 15);  // Right side, under beaufort
+        lv_obj_set_width(wind_location_, 170);
+
+        wind_built_ = true;
+    }
+
+    lv_obj_clear_flag(wind_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void SkyGuardDisplay::BuildPageWind() {
+    SetPageAccent(title_icon_, title_accent_, lv_color_hex(0x44BBAA));  // Teal — wind
+    lv_label_set_text(data_title_, "VENTO");
+    ShowWindPage();
+}
+
+// Bresenham line drawing on canvas
+static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_color_t col, int size) {
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    int half = size / 2;
+    while (true) {
+        for (int ox = -half; ox <= half; ox++)
+            for (int oy = -half; oy <= half; oy++) {
+                int px = x0 + ox, py = y0 + oy;
+                if (px >= 0 && px < 130 && py >= 0 && py < 130)
+                    lv_canvas_set_px(canvas, px, py, col, LV_OPA_COVER);
+            }
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+// Bresenham circle on canvas
+static void CanvasCircle(lv_obj_t* canvas, int cx, int cy, int r, lv_color_t col, int size) {
+    int x = 0, y = r, d = 3 - 2 * r;
+    auto plot = [&](int px, int py) {
+        int half = size / 2;
+        for (int ox = -half; ox <= half; ox++)
+            for (int oy = -half; oy <= half; oy++) {
+                int ppx = px + ox, ppy = py + oy;
+                if (ppx >= 0 && ppx < 130 && ppy >= 0 && ppy < 130)
+                    lv_canvas_set_px(canvas, ppx, ppy, col, LV_OPA_COVER);
+            }
+    };
+    while (x <= y) {
+        plot(cx+x,cy+y); plot(cx-x,cy+y); plot(cx+x,cy-y); plot(cx-x,cy-y);
+        plot(cx+y,cy+x); plot(cx-y,cy+x); plot(cx+y,cy-x); plot(cx-y,cy-x);
+        if (d < 0) { d += 4 * x + 6; } else { d += 4 * (x - y) + 10; y--; }
+        x++;
+    }
+}
+
+static void DrawCompassRose(lv_obj_t* canvas, int size, int wind_deg, float wind_speed) {
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x1A1A2E), LV_OPA_COVER);
+
+    int cx = size / 2, cy = size / 2, r = size / 2 - 4;
+    lv_color_t ring_col = lv_color_hex(0x334455);
+    lv_color_t dim_col = lv_color_hex(0x222233);
+
+    // Outer + inner rings
+    CanvasCircle(canvas, cx, cy, r, ring_col, 2);
+    CanvasCircle(canvas, cx, cy, r / 2, dim_col, 1);
+
+    // Crosshairs
+    CanvasLine(canvas, cx - r, cy, cx + r, cy, dim_col, 1);
+    CanvasLine(canvas, cx, cy - r, cx, cy + r, dim_col, 1);
+
+    // Cardinal labels via set_px (simple 3x5 pixel font approximation)
+    // N at top
+    lv_color_t lbl_col = lv_color_hex(0x88AACC);
+    for (int i = -1; i <= 1; i++)
+        lv_canvas_set_px(canvas, cx + i, cy - r - 2, lbl_col, LV_OPA_COVER);
+    // S at bottom
+    for (int i = -1; i <= 1; i++)
+        lv_canvas_set_px(canvas, cx + i, cy + r + 2, lbl_col, LV_OPA_COVER);
+    // E at right
+    for (int i = -1; i <= 1; i++)
+        lv_canvas_set_px(canvas, cx + r + 2, cy + i, lbl_col, LV_OPA_COVER);
+    // W at left
+    for (int i = -1; i <= 1; i++)
+        lv_canvas_set_px(canvas, cx - r - 2, cy + i, lbl_col, LV_OPA_COVER);
+
+    // Wind arrow
+    float rad = wind_deg * M_PI / 180.0f;
+    int tipX = cx + (int)(sinf(rad) * (r - 8));
+    int tipY = cy - (int)(cosf(rad) * (r - 8));
+
+    lv_color_t arrowCol = (wind_speed > 40) ? lv_color_hex(0xFF3333) :
+                          (wind_speed > 20) ? lv_color_hex(0xFFBB00) :
+                                              lv_color_hex(0x00CCFF);
+    // Main shaft
+    CanvasLine(canvas, cx, cy, tipX, tipY, arrowCol, 3);
+
+    // Arrowhead
+    float aR1 = rad + 2.7f, aR2 = rad - 2.7f;
+    int ah1x = cx + (int)(sinf(aR1) * 12);
+    int ah1y = cy - (int)(cosf(aR1) * 12);
+    int ah2x = cx + (int)(sinf(aR2) * 12);
+    int ah2y = cy - (int)(cosf(aR2) * 12);
+    CanvasLine(canvas, tipX, tipY, ah1x, ah1y, arrowCol, 2);
+    CanvasLine(canvas, tipX, tipY, ah2x, ah2y, arrowCol, 2);
+
+    // Center dot
+    CanvasCircle(canvas, cx, cy, 3, arrowCol, 1);
+    lv_canvas_set_px(canvas, cx, cy, arrowCol, LV_OPA_COVER);
+}
+
+void SkyGuardDisplay::UpdatePageWind() {
+    if (!wind_built_) return;
+
+    // Update location footer
+    if (wind_location_) {
+        char loc_buf[64];
+        float lat, lon;
+        bool has_pos = HasPosition(lat, lon);
+        BuildLocationString(loc_buf, sizeof(loc_buf), location_name_, weather_,
+                            has_pos ? lat : 0, has_pos ? lon : 0, has_pos);
+        lv_label_set_text(wind_location_, loc_buf);
+    }
+
+    if (!weather_ || !weather_->HasData()) {
+        lv_label_set_text(wind_dir_lbl_, "--");
+        lv_label_set_text(wind_speed_lbl_, "-- km/h");
+        lv_label_set_text(wind_gust_lbl_, "");
+        lv_label_set_text(wind_beaufort_lbl_, "");
+        return;
+    }
+
+    ForecastData forecast = weather_->GetForecast();
+    if (forecast.count == 0) return;
+
+    auto& now_e = forecast.entries[0];
+    float windKmh = now_e.wind_speed * 3.6f;
+    float gustKmh = now_e.wind_gust * 3.6f;
+    int deg = now_e.wind_deg;
+
+    // Draw compass
+    if (wind_compass_canvas_) {
+        DrawCompassRose(wind_compass_canvas_, WIND_COMPASS_SIZE, deg, windKmh);
+        lv_obj_invalidate(wind_compass_canvas_);
+    }
+
+    // Direction name
+    static const char* dirNames[] = {"N","NNE","NE","ENE","E","ESE","SE","SSE",
+                                     "S","SSW","SW","WSW","W","WNW","NW","NNW"};
+    int dirIdx = ((deg + 11) % 360) / 22;
+    if (dirIdx > 15) dirIdx = 0;
+
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%s %d\xC2\xB0", dirNames[dirIdx], deg);
+    lv_label_set_text(wind_dir_lbl_, buf);
+
+    // Speed
+    lv_color_t spdCol = windKmh > 40 ? SG_BAD_COLOR : (windKmh > 20 ? SG_WARN_COLOR : SG_GOOD_COLOR);
+    snprintf(buf, sizeof(buf), "%.0f km/h", windKmh);
+    lv_label_set_text(wind_speed_lbl_, buf);
+    lv_obj_set_style_text_color(wind_speed_lbl_, spdCol, 0);
+
+    // Gusts
+    if (gustKmh > windKmh + 2) {
+        snprintf(buf, sizeof(buf), "Raffiche %.0f km/h", gustKmh);
+        lv_label_set_text(wind_gust_lbl_, buf);
+        lv_obj_set_style_text_color(wind_gust_lbl_,
+            gustKmh > 50 ? SG_BAD_COLOR : (gustKmh > 30 ? SG_WARN_COLOR : SG_DIM_COLOR), 0);
+    } else {
+        lv_label_set_text(wind_gust_lbl_, "");
+    }
+
+    // Beaufort
+    float ws = now_e.wind_speed;
+    int beau = 0;
+    if (ws >= 20.8f) beau = 9; else if (ws >= 17.2f) beau = 8;
+    else if (ws >= 13.9f) beau = 7; else if (ws >= 10.8f) beau = 6;
+    else if (ws >= 8.0f) beau = 5; else if (ws >= 5.5f) beau = 4;
+    else if (ws >= 3.4f) beau = 3; else if (ws >= 1.6f) beau = 2;
+    else if (ws >= 0.3f) beau = 1;
+    snprintf(buf, sizeof(buf), "Beaufort %d", beau);
+    lv_label_set_text(wind_beaufort_lbl_, buf);
+
+    // Forecast table (5 rows)
+    int maxR = forecast.count < 5 ? forecast.count : 5;
+    for (int i = 0; i < 5; i++) {
+        if (i >= maxR) {
+            lv_label_set_text(wind_forecast_[i], "");
+            continue;
+        }
+        auto& e = forecast.entries[i];
+        float wk = e.wind_speed * 3.6f;
+        float gk = e.wind_gust * 3.6f;
+        int di = ((e.wind_deg + 11) % 360) / 22;
+        if (di > 15) di = 0;
+
+        if (gk > wk + 2) {
+            snprintf(buf, sizeof(buf), "%-5s   %3.0f       %3.0f      %s",
+                     e.time_str, wk, gk, dirNames[di]);
+        } else {
+            snprintf(buf, sizeof(buf), "%-5s   %3.0f        -       %s",
+                     e.time_str, wk, dirNames[di]);
+        }
+        lv_label_set_text(wind_forecast_[i], buf);
+
+        // Color speed
+        lv_obj_set_style_text_color(wind_forecast_[i],
+            wk > 40 ? SG_BAD_COLOR : (wk > 20 ? SG_WARN_COLOR : SG_TEXT_COLOR), 0);
+    }
+}
+
+// ==========================================================================
+// MIC MUTE
+// ==========================================================================
+
+void SkyGuardDisplay::ToggleMicMute() {
+    mic_muted_ = !mic_muted_;
+    ESP_LOGI(TAG, "Mic mute toggled: %s", mic_muted_ ? "MUTED" : "UNMUTED");
+
+    // Update button visual
+    if (mic_mute_btn_ && lvgl_port_lock(50)) {
+        if (mic_muted_) {
+            lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0xCC2222), 0);
+            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_MUTE);
+        } else {
+            lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0x1A3366), 0);
+            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_VOLUME_MAX);
+        }
+        lvgl_port_unlock();
+    }
+
+    // Notify board to enable/disable codec input
+    if (mic_mute_cb_) {
+        mic_mute_cb_(mic_mute_ctx_, mic_muted_);
+    }
+}
+
 void SkyGuardDisplay::UpdatePageAircraft() {
     if (!radar_built_) return;
+
+    // Update location footer
+    if (radar_location_) {
+        char loc_buf[64];
+        float lat, lon;
+        bool has_pos = HasPosition(lat, lon);
+        BuildLocationString(loc_buf, sizeof(loc_buf), location_name_, weather_,
+                            has_pos ? lat : 0, has_pos ? lon : 0, has_pos);
+        lv_label_set_text(radar_location_, loc_buf);
+    }
 
     // Hide all dots + trails first
     for (int i = 0; i < 8; i++) {
@@ -3770,6 +4176,16 @@ void SkyGuardDisplay::UpdatePageAircraft() {
 
 void SkyGuardDisplay::UpdatePageSatellites() {
     if (!sat_dome_built_) return;
+
+    // Update location footer
+    if (sat_location_) {
+        char loc_buf[64];
+        float lat, lon;
+        bool has_pos = HasPosition(lat, lon);
+        BuildLocationString(loc_buf, sizeof(loc_buf), location_name_, weather_,
+                            has_pos ? lat : 0, has_pos ? lon : 0, has_pos);
+        lv_label_set_text(sat_location_, loc_buf);
+    }
 
     // Hide all dots + trail dots first
     for (int i = 0; i < 6; i++) {
