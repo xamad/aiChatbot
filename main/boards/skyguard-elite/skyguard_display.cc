@@ -1755,8 +1755,8 @@ void SkyGuardDisplay::Setup() {
     lv_obj_clear_flag(mic_mute_btn_, LV_OBJ_FLAG_SCROLLABLE);
 
     mic_mute_icon_ = lv_label_create(mic_mute_btn_);
-    lv_label_set_text(mic_mute_icon_, LV_SYMBOL_AUDIO);
-    lv_obj_set_style_text_font(mic_mute_icon_, GetSmallFont(), 0);
+    lv_label_set_text(mic_mute_icon_, "MIC");
+    lv_obj_set_style_text_font(mic_mute_icon_, GetTinyFont(), 0);
     lv_obj_set_style_text_color(mic_mute_icon_, lv_color_white(), 0);
     lv_obj_center(mic_mute_icon_);
 
@@ -4014,10 +4014,10 @@ void SkyGuardDisplay::ToggleMicMute() {
     if (mic_mute_btn_ && lvgl_port_lock(50)) {
         if (mic_muted_) {
             lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0xCC2222), 0);
-            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_MUTE);
+            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, "MUT");
         } else {
             lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0x1A3366), 0);
-            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_AUDIO);
+            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, "MIC");
         }
         lvgl_port_unlock();
     }
