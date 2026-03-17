@@ -246,7 +246,7 @@ private:
     lv_obj_t* wind_container_ = nullptr;
     lv_obj_t* wind_compass_canvas_ = nullptr;    // Canvas for compass rose + arrow
     uint8_t* wind_compass_buf_ = nullptr;
-    static constexpr int WIND_COMPASS_SIZE = 130;
+    static constexpr int WIND_COMPASS_SIZE = 100;
     lv_obj_t* wind_speed_lbl_ = nullptr;         // "23 km/h"
     lv_obj_t* wind_dir_lbl_ = nullptr;           // "NNE 22°"
     lv_obj_t* wind_gust_lbl_ = nullptr;          // "Raffiche 35"

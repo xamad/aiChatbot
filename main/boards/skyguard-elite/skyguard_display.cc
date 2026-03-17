@@ -1755,7 +1755,7 @@ void SkyGuardDisplay::Setup() {
     lv_obj_clear_flag(mic_mute_btn_, LV_OBJ_FLAG_SCROLLABLE);
 
     mic_mute_icon_ = lv_label_create(mic_mute_btn_);
-    lv_label_set_text(mic_mute_icon_, LV_SYMBOL_VOLUME_MAX);
+    lv_label_set_text(mic_mute_icon_, LV_SYMBOL_AUDIO);
     lv_obj_set_style_text_font(mic_mute_icon_, GetSmallFont(), 0);
     lv_obj_set_style_text_color(mic_mute_icon_, lv_color_white(), 0);
     lv_obj_center(mic_mute_icon_);
@@ -3737,27 +3737,27 @@ void SkyGuardDisplay::ShowWindPage() {
             lv_obj_set_pos(wind_compass_canvas_, 2, 4);
         }
 
-        // Right side: labels
-        int rx = 140;
+        // Right side: labels (compass is 100px, starts at x=2)
+        int rx = 110;
         wind_dir_lbl_ = lv_label_create(wind_container_);
-        lv_obj_set_style_text_font(wind_dir_lbl_, GetMediumFont(), 0);
+        lv_obj_set_style_text_font(wind_dir_lbl_, GetSmallFont(), 0);
         lv_obj_set_style_text_color(wind_dir_lbl_, SG_TITLE_COLOR, 0);
         lv_obj_set_pos(wind_dir_lbl_, rx, 6);
 
         wind_speed_lbl_ = lv_label_create(wind_container_);
-        lv_obj_set_style_text_font(wind_speed_lbl_, GetLargeFont(), 0);
+        lv_obj_set_style_text_font(wind_speed_lbl_, GetMediumFont(), 0);
         lv_obj_set_style_text_color(wind_speed_lbl_, SG_VALUE_COLOR, 0);
-        lv_obj_set_pos(wind_speed_lbl_, rx, 30);
+        lv_obj_set_pos(wind_speed_lbl_, rx, 24);
 
         wind_gust_lbl_ = lv_label_create(wind_container_);
-        lv_obj_set_style_text_font(wind_gust_lbl_, GetSmallFont(), 0);
+        lv_obj_set_style_text_font(wind_gust_lbl_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_gust_lbl_, SG_DIM_COLOR, 0);
-        lv_obj_set_pos(wind_gust_lbl_, rx, 62);
+        lv_obj_set_pos(wind_gust_lbl_, rx, 48);
 
         wind_beaufort_lbl_ = lv_label_create(wind_container_);
-        lv_obj_set_style_text_font(wind_beaufort_lbl_, GetSmallFont(), 0);
+        lv_obj_set_style_text_font(wind_beaufort_lbl_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_beaufort_lbl_, SG_DIM_COLOR, 0);
-        lv_obj_set_pos(wind_beaufort_lbl_, rx, 80);
+        lv_obj_set_pos(wind_beaufort_lbl_, rx, 62);
 
         // Separator
         lv_obj_t* sep = lv_obj_create(wind_container_);
@@ -3792,7 +3792,7 @@ void SkyGuardDisplay::ShowWindPage() {
         lv_obj_set_style_text_font(wind_location_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_location_, SG_DIM_COLOR, 0);
         lv_label_set_text(wind_location_, LV_SYMBOL_GPS " --");
-        lv_obj_set_pos(wind_location_, 140, 80 + 15);  // Right side, under beaufort
+        lv_obj_set_pos(wind_location_, 110, 76);  // Right side, under beaufort
         lv_obj_set_width(wind_location_, 170);
 
         wind_built_ = true;
@@ -3807,17 +3807,17 @@ void SkyGuardDisplay::BuildPageWind() {
     ShowWindPage();
 }
 
-// Bresenham line drawing on canvas
-static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_color_t col, int size) {
+// Bresenham line drawing on canvas (S = canvas dimension)
+static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_color_t col, int thick, int S = 100) {
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
-    int half = size / 2;
+    int half = thick / 2;
     while (true) {
         for (int ox = -half; ox <= half; ox++)
             for (int oy = -half; oy <= half; oy++) {
                 int px = x0 + ox, py = y0 + oy;
-                if (px >= 0 && px < 130 && py >= 0 && py < 130)
+                if (px >= 0 && px < S && py >= 0 && py < S)
                     lv_canvas_set_px(canvas, px, py, col, LV_OPA_COVER);
             }
         if (x0 == x1 && y0 == y1) break;
@@ -3827,15 +3827,15 @@ static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_colo
     }
 }
 
-// Bresenham circle on canvas
-static void CanvasCircle(lv_obj_t* canvas, int cx, int cy, int r, lv_color_t col, int size) {
+// Bresenham circle on canvas (S = canvas dimension)
+static void CanvasCircle(lv_obj_t* canvas, int cx, int cy, int r, lv_color_t col, int thick, int S = 100) {
     int x = 0, y = r, d = 3 - 2 * r;
     auto plot = [&](int px, int py) {
-        int half = size / 2;
+        int half = thick / 2;
         for (int ox = -half; ox <= half; ox++)
             for (int oy = -half; oy <= half; oy++) {
                 int ppx = px + ox, ppy = py + oy;
-                if (ppx >= 0 && ppx < 130 && ppy >= 0 && ppy < 130)
+                if (ppx >= 0 && ppx < S && ppy >= 0 && ppy < S)
                     lv_canvas_set_px(canvas, ppx, ppy, col, LV_OPA_COVER);
             }
     };
@@ -3855,12 +3855,12 @@ static void DrawCompassRose(lv_obj_t* canvas, int size, int wind_deg, float wind
     lv_color_t dim_col = lv_color_hex(0x222233);
 
     // Outer + inner rings
-    CanvasCircle(canvas, cx, cy, r, ring_col, 2);
-    CanvasCircle(canvas, cx, cy, r / 2, dim_col, 1);
+    CanvasCircle(canvas, cx, cy, r, ring_col, 2, size);
+    CanvasCircle(canvas, cx, cy, r / 2, dim_col, 1, size);
 
     // Crosshairs
-    CanvasLine(canvas, cx - r, cy, cx + r, cy, dim_col, 1);
-    CanvasLine(canvas, cx, cy - r, cx, cy + r, dim_col, 1);
+    CanvasLine(canvas, cx - r, cy, cx + r, cy, dim_col, 1, size);
+    CanvasLine(canvas, cx, cy - r, cx, cy + r, dim_col, 1, size);
 
     // Cardinal labels via set_px (simple 3x5 pixel font approximation)
     // N at top
@@ -3886,19 +3886,19 @@ static void DrawCompassRose(lv_obj_t* canvas, int size, int wind_deg, float wind
                           (wind_speed > 20) ? lv_color_hex(0xFFBB00) :
                                               lv_color_hex(0x00CCFF);
     // Main shaft
-    CanvasLine(canvas, cx, cy, tipX, tipY, arrowCol, 3);
+    CanvasLine(canvas, cx, cy, tipX, tipY, arrowCol, 2, size);
 
     // Arrowhead
     float aR1 = rad + 2.7f, aR2 = rad - 2.7f;
-    int ah1x = cx + (int)(sinf(aR1) * 12);
-    int ah1y = cy - (int)(cosf(aR1) * 12);
-    int ah2x = cx + (int)(sinf(aR2) * 12);
-    int ah2y = cy - (int)(cosf(aR2) * 12);
-    CanvasLine(canvas, tipX, tipY, ah1x, ah1y, arrowCol, 2);
-    CanvasLine(canvas, tipX, tipY, ah2x, ah2y, arrowCol, 2);
+    int ah1x = cx + (int)(sinf(aR1) * 10);
+    int ah1y = cy - (int)(cosf(aR1) * 10);
+    int ah2x = cx + (int)(sinf(aR2) * 10);
+    int ah2y = cy - (int)(cosf(aR2) * 10);
+    CanvasLine(canvas, tipX, tipY, ah1x, ah1y, arrowCol, 2, size);
+    CanvasLine(canvas, tipX, tipY, ah2x, ah2y, arrowCol, 2, size);
 
     // Center dot
-    CanvasCircle(canvas, cx, cy, 3, arrowCol, 1);
+    CanvasCircle(canvas, cx, cy, 2, arrowCol, 1, size);
     lv_canvas_set_px(canvas, cx, cy, arrowCol, LV_OPA_COVER);
 }
 
@@ -4017,7 +4017,7 @@ void SkyGuardDisplay::ToggleMicMute() {
             if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_MUTE);
         } else {
             lv_obj_set_style_bg_color(mic_mute_btn_, lv_color_hex(0x1A3366), 0);
-            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_VOLUME_MAX);
+            if (mic_mute_icon_) lv_label_set_text(mic_mute_icon_, LV_SYMBOL_AUDIO);
         }
         lvgl_port_unlock();
     }
