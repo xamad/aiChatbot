@@ -1146,7 +1146,7 @@ void SkyGuardDisplay::Setup() {
         lv_label_set_text(weather_time_[i], "--:--");
         lv_obj_set_pos(weather_time_[i], cx, 0);
 
-        weather_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, icon_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
+        weather_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, icon_buf_size, MALLOC_CAP_DEFAULT);
         if (weather_icon_bufs_[i]) {
             weather_icon_canvas_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_icon_canvas_[i], weather_icon_bufs_[i],
@@ -1262,7 +1262,7 @@ void SkyGuardDisplay::Setup() {
         lv_label_set_text(weather_daily_day_[i], "--");
         lv_obj_set_pos(weather_daily_day_[i], cx, 86);
 
-        weather_daily_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, mini_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
+        weather_daily_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, mini_buf_size, MALLOC_CAP_DEFAULT);
         if (weather_daily_icon_bufs_[i]) {
             weather_daily_icon_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_daily_icon_[i], weather_daily_icon_bufs_[i],
@@ -1911,13 +1911,12 @@ void SkyGuardDisplay::DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* 
                     lv_canvas_set_px(canvas, rx, ry, sun_core, 180);
             }
         }
-        drawCloud(S*9/16, S*5/8, S/20.0f, cloud_hi, cloud_lo);
+        drawCloud(S*9/16, S*5/8, 1.2f, cloud_hi, cloud_lo);
     } else {
         // ===== CLOUDY / OVERCAST / RAIN / SNOW =====
         lv_color_t top = (clouds > 70) ? cloud_lo : cloud_hi;
         lv_color_t bot = (clouds > 70) ? dark_cloud : cloud_lo;
-        float cscale = S / 16.0f;
-        drawCloud(S/2, S*7/16, cscale, top, bot);
+        drawCloud(S/2, S*3/8, 1.5f, top, bot);
 
         if (has_rain) {
             int dy = S*3/4;
@@ -3844,30 +3843,30 @@ void SkyGuardDisplay::ShowWindPage() {
         if (wind_compass_buf_) {
             wind_compass_canvas_ = lv_canvas_create(wind_container_);
             lv_canvas_set_buffer(wind_compass_canvas_, wind_compass_buf_, WIND_COMPASS_SIZE, WIND_COMPASS_SIZE, LV_COLOR_FORMAT_RGB565);
-            lv_obj_set_pos(wind_compass_canvas_, 2, 4);
+            lv_obj_set_pos(wind_compass_canvas_, 8, 10);
         }
 
-        // Right side: labels (compass is 100px, starts at x=2)
-        int rx = 110;
+        // Right side: labels (compass is 76px, starts at x=8)
+        int rx = 92;
         wind_dir_lbl_ = lv_label_create(wind_container_);
         lv_obj_set_style_text_font(wind_dir_lbl_, GetSmallFont(), 0);
         lv_obj_set_style_text_color(wind_dir_lbl_, SG_TITLE_COLOR, 0);
-        lv_obj_set_pos(wind_dir_lbl_, rx, 6);
+        lv_obj_set_pos(wind_dir_lbl_, rx, 12);
 
         wind_speed_lbl_ = lv_label_create(wind_container_);
         lv_obj_set_style_text_font(wind_speed_lbl_, GetMediumFont(), 0);
         lv_obj_set_style_text_color(wind_speed_lbl_, SG_VALUE_COLOR, 0);
-        lv_obj_set_pos(wind_speed_lbl_, rx, 24);
+        lv_obj_set_pos(wind_speed_lbl_, rx, 28);
 
         wind_gust_lbl_ = lv_label_create(wind_container_);
         lv_obj_set_style_text_font(wind_gust_lbl_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_gust_lbl_, SG_DIM_COLOR, 0);
-        lv_obj_set_pos(wind_gust_lbl_, rx, 48);
+        lv_obj_set_pos(wind_gust_lbl_, rx, 52);
 
         wind_beaufort_lbl_ = lv_label_create(wind_container_);
         lv_obj_set_style_text_font(wind_beaufort_lbl_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_beaufort_lbl_, SG_DIM_COLOR, 0);
-        lv_obj_set_pos(wind_beaufort_lbl_, rx, 62);
+        lv_obj_set_pos(wind_beaufort_lbl_, rx, 64);
 
         // Separator
         lv_obj_t* sep = lv_obj_create(wind_container_);
@@ -3902,7 +3901,7 @@ void SkyGuardDisplay::ShowWindPage() {
         lv_obj_set_style_text_font(wind_location_, GetTinyFont(), 0);
         lv_obj_set_style_text_color(wind_location_, SG_DIM_COLOR, 0);
         lv_label_set_text(wind_location_, LV_SYMBOL_GPS " --");
-        lv_obj_set_pos(wind_location_, 110, 76);  // Right side, under beaufort
+        lv_obj_set_pos(wind_location_, 92, 78);  // Right side, under beaufort
         lv_obj_set_width(wind_location_, 170);
 
         wind_built_ = true;
@@ -3918,7 +3917,7 @@ void SkyGuardDisplay::BuildPageWind() {
 }
 
 // Bresenham line drawing on canvas (S = canvas dimension)
-static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_color_t col, int thick, int S = 100) {
+static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_color_t col, int thick, int S = 76) {
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
@@ -3938,7 +3937,7 @@ static void CanvasLine(lv_obj_t* canvas, int x0, int y0, int x1, int y1, lv_colo
 }
 
 // Bresenham circle on canvas (S = canvas dimension)
-static void CanvasCircle(lv_obj_t* canvas, int cx, int cy, int r, lv_color_t col, int thick, int S = 100) {
+static void CanvasCircle(lv_obj_t* canvas, int cx, int cy, int r, lv_color_t col, int thick, int S = 76) {
     int x = 0, y = r, d = 3 - 2 * r;
     auto plot = [&](int px, int py) {
         int half = thick / 2;
