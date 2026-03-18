@@ -238,7 +238,12 @@ private:
     uint8_t* weather_icon_bufs_[6] = {};
     bool weather_built_ = false;
     static constexpr int WICON_SIZE = 32;
-    static constexpr int WICON_MINI = 20;
+    static constexpr int WICON_MINI = 32;  // Upgraded from 20 for better detail
+
+    // Weather detail popup (shown on tap)
+    lv_obj_t* weather_popup_ = nullptr;
+    void ShowWeatherPopup(int col_idx, bool is_daily);
+    void DismissWeatherPopup();
 
     static void DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* desc);
 

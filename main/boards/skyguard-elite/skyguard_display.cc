@@ -1119,21 +1119,19 @@ void SkyGuardDisplay::Setup() {
     lv_obj_set_pos(weather_location_, 0, 0);
 
     int content_w = w - 16 - 12;
-    // 5 hourly columns + 5 daily columns (same width)
-    int col_w = 52;
-    int col_spacing = 4;
+    // 5 columns for both hourly and daily
+    int col_w = 56;
+    int col_spacing = 2;
     int total_5col_w = 5 * col_w + 4 * col_spacing;
     int col_start_x = (content_w - total_5col_w) / 2;
     if (col_start_x < 0) col_start_x = 0;
 
     // ========== HOURLY SECTION (5 columns) ==========
     // y=0:   time
-    // y=9:   icon (20x20)
-    // y=30:  temperature
-    // y=40:  cloud bar
-    // y=43:  clouds%
-    // y=52:  rain (pop% + mm)
-    // y=61:  wind
+    // y=10:  icon (32x32)
+    // y=44:  temperature (large)
+    // y=58:  rain info
+    // y=68:  wind
 
     int icon_buf_size = LV_CANVAS_BUF_SIZE(WICON_MINI, WICON_MINI, 16, LV_DRAW_BUF_STRIDE_ALIGN);
 
@@ -1148,12 +1146,24 @@ void SkyGuardDisplay::Setup() {
         lv_label_set_text(weather_time_[i], "--:--");
         lv_obj_set_pos(weather_time_[i], cx, 0);
 
-        weather_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, icon_buf_size, MALLOC_CAP_DEFAULT);
+        weather_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, icon_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
         if (weather_icon_bufs_[i]) {
             weather_icon_canvas_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_icon_canvas_[i], weather_icon_bufs_[i],
                                  WICON_MINI, WICON_MINI, LV_COLOR_FORMAT_RGB565);
-            lv_obj_set_pos(weather_icon_canvas_[i], cx + (col_w - WICON_MINI) / 2, 9);
+            lv_obj_set_pos(weather_icon_canvas_[i], cx + (col_w - WICON_MINI) / 2, 10);
+            // Make icon clickable for details popup
+            lv_obj_add_flag(weather_icon_canvas_[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(weather_icon_canvas_[i], [](lv_event_t* e) {
+                auto* self = (SkyGuardDisplay*)lv_event_get_user_data(e);
+                lv_obj_t* target = (lv_obj_t*)lv_event_get_target(e);
+                for (int j = 0; j < 5; j++) {
+                    if (self->weather_icon_canvas_[j] == target) {
+                        self->ShowWeatherPopup(j, false);
+                        return;
+                    }
+                }
+            }, LV_EVENT_CLICKED, this);
         }
 
         weather_temp_[i] = lv_label_create(weather_container_);
@@ -1162,24 +1172,25 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_temp_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_temp_[i], col_w);
         lv_label_set_text(weather_temp_[i], "--");
-        lv_obj_set_pos(weather_temp_[i], cx, 30);
+        lv_obj_set_pos(weather_temp_[i], cx, 44);
 
-        // Cloud bar (compact: 3px)
+        // Cloud bar (thicker: 4px)
         weather_cloud_bar_[i] = lv_obj_create(weather_container_);
         lv_obj_remove_style_all(weather_cloud_bar_[i]);
-        lv_obj_set_size(weather_cloud_bar_[i], col_w - 8, 3);
-        lv_obj_set_pos(weather_cloud_bar_[i], cx + 4, 40);
+        lv_obj_set_size(weather_cloud_bar_[i], col_w - 6, 4);
+        lv_obj_set_pos(weather_cloud_bar_[i], cx + 3, 58);
         lv_obj_set_style_bg_color(weather_cloud_bar_[i], SG_GOOD_COLOR, 0);
         lv_obj_set_style_bg_opa(weather_cloud_bar_[i], LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(weather_cloud_bar_[i], 1, 0);
+        lv_obj_set_style_radius(weather_cloud_bar_[i], 2, 0);
 
         weather_cloud_val_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_cloud_val_[i], GetTinyFont(), 0);
-        lv_obj_set_style_text_color(weather_cloud_val_[i], SG_TEXT_COLOR, 0);
+        lv_obj_set_style_text_color(weather_cloud_val_[i], SG_DIM_COLOR, 0);
         lv_obj_set_style_text_align(weather_cloud_val_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_cloud_val_[i], col_w);
-        lv_label_set_text(weather_cloud_val_[i], "--%");
-        lv_obj_set_pos(weather_cloud_val_[i], cx, 43);
+        lv_label_set_text(weather_cloud_val_[i], "");
+        lv_obj_set_pos(weather_cloud_val_[i], cx, 62);
+        lv_obj_add_flag(weather_cloud_val_[i], LV_OBJ_FLAG_HIDDEN);  // Hidden, shown in popup
 
         // Rain: probability + mm
         weather_rain_[i] = lv_label_create(weather_container_);
@@ -1187,18 +1198,18 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_color(weather_rain_[i], lv_color_hex(0x55AAFF), 0);
         lv_obj_set_style_text_align(weather_rain_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_rain_[i], col_w);
-        lv_label_set_text(weather_rain_[i], "--");
-        lv_obj_set_pos(weather_rain_[i], cx, 52);
+        lv_label_set_text(weather_rain_[i], "");
+        lv_obj_set_pos(weather_rain_[i], cx, 63);
 
         weather_wind_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_wind_[i], GetTinyFont(), 0);
         lv_obj_set_style_text_color(weather_wind_[i], SG_DIM_COLOR, 0);
         lv_obj_set_style_text_align(weather_wind_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_wind_[i], col_w);
-        lv_label_set_text(weather_wind_[i], "--");
-        lv_obj_set_pos(weather_wind_[i], cx, 61);
+        lv_label_set_text(weather_wind_[i], "");
+        lv_obj_set_pos(weather_wind_[i], cx, 73);
 
-        // Humidity and seeing hidden (no space — show only in daily)
+        // Hidden data slots (used by popup)
         weather_hum_[i] = lv_label_create(weather_container_);
         lv_label_set_text(weather_hum_[i], "");
         lv_obj_add_flag(weather_hum_[i], LV_OBJ_FLAG_HIDDEN);
@@ -1224,20 +1235,19 @@ void SkyGuardDisplay::Setup() {
     weather_desc_[5] = nullptr;
     weather_icon_bufs_[5] = nullptr;
 
-    // ========== SEPARATOR LINE at y=72 ==========
+    // ========== SEPARATOR LINE ==========
     weather_daily_sep_ = lv_obj_create(weather_container_);
     lv_obj_remove_style_all(weather_daily_sep_);
     lv_obj_set_size(weather_daily_sep_, content_w - 8, 1);
-    lv_obj_set_pos(weather_daily_sep_, 4, 72);
+    lv_obj_set_pos(weather_daily_sep_, 4, 84);
     lv_obj_set_style_bg_color(weather_daily_sep_, lv_color_hex(0x2A2A44), 0);
     lv_obj_set_style_bg_opa(weather_daily_sep_, LV_OPA_COVER, 0);
 
     // ========== DAILY SECTION (5 columns) ==========
-    // y=75:  day name
-    // y=84:  icon (20x20)
-    // y=104: min/max temp
-    // y=116: clouds%
-    // y=125: rain (pop% + mm)
+    // y=86:  day name
+    // y=96:  icon (32x32)
+    // y=130: min/max temp
+    // y=144: rain
 
     int mini_buf_size = LV_CANVAS_BUF_SIZE(WICON_MINI, WICON_MINI, 16, LV_DRAW_BUF_STRIDE_ALIGN);
 
@@ -1250,40 +1260,51 @@ void SkyGuardDisplay::Setup() {
         lv_obj_set_style_text_align(weather_daily_day_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_day_[i], col_w);
         lv_label_set_text(weather_daily_day_[i], "--");
-        lv_obj_set_pos(weather_daily_day_[i], cx, 75);
+        lv_obj_set_pos(weather_daily_day_[i], cx, 86);
 
-        weather_daily_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, mini_buf_size, MALLOC_CAP_DEFAULT);
+        weather_daily_icon_bufs_[i] = (uint8_t*)heap_caps_calloc(1, mini_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
         if (weather_daily_icon_bufs_[i]) {
             weather_daily_icon_[i] = lv_canvas_create(weather_container_);
             lv_canvas_set_buffer(weather_daily_icon_[i], weather_daily_icon_bufs_[i],
                                  WICON_MINI, WICON_MINI, LV_COLOR_FORMAT_RGB565);
-            lv_obj_set_pos(weather_daily_icon_[i], cx + (col_w - WICON_MINI) / 2, 84);
+            lv_obj_set_pos(weather_daily_icon_[i], cx + (col_w - WICON_MINI) / 2, 96);
+            // Clickable for details popup
+            lv_obj_add_flag(weather_daily_icon_[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(weather_daily_icon_[i], [](lv_event_t* e) {
+                auto* self = (SkyGuardDisplay*)lv_event_get_user_data(e);
+                lv_obj_t* target = (lv_obj_t*)lv_event_get_target(e);
+                for (int j = 0; j < 5; j++) {
+                    if (self->weather_daily_icon_[j] == target) {
+                        self->ShowWeatherPopup(j, true);
+                        return;
+                    }
+                }
+            }, LV_EVENT_CLICKED, this);
         }
 
         weather_daily_temp_[i] = lv_label_create(weather_container_);
-        lv_obj_set_style_text_font(weather_daily_temp_[i], GetSmallFont(), 0);
+        lv_obj_set_style_text_font(weather_daily_temp_[i], GetTinyFont(), 0);
         lv_obj_set_style_text_color(weather_daily_temp_[i], SG_VALUE_COLOR, 0);
         lv_obj_set_style_text_align(weather_daily_temp_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_temp_[i], col_w);
         lv_label_set_text(weather_daily_temp_[i], "--");
-        lv_obj_set_pos(weather_daily_temp_[i], cx, 104);
+        lv_obj_set_pos(weather_daily_temp_[i], cx, 130);
 
         weather_daily_cloud_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_daily_cloud_[i], GetTinyFont(), 0);
-        lv_obj_set_style_text_color(weather_daily_cloud_[i], SG_TEXT_COLOR, 0);
+        lv_obj_set_style_text_color(weather_daily_cloud_[i], SG_DIM_COLOR, 0);
         lv_obj_set_style_text_align(weather_daily_cloud_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_cloud_[i], col_w);
-        lv_label_set_text(weather_daily_cloud_[i], "--%");
-        lv_obj_set_pos(weather_daily_cloud_[i], cx, 116);
+        lv_label_set_text(weather_daily_cloud_[i], "");
+        lv_obj_set_pos(weather_daily_cloud_[i], cx, 142);
 
-        // Daily rain: max pop% + total mm
         weather_daily_rain_[i] = lv_label_create(weather_container_);
         lv_obj_set_style_text_font(weather_daily_rain_[i], GetTinyFont(), 0);
         lv_obj_set_style_text_color(weather_daily_rain_[i], lv_color_hex(0x55AAFF), 0);
         lv_obj_set_style_text_align(weather_daily_rain_[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(weather_daily_rain_[i], col_w);
-        lv_label_set_text(weather_daily_rain_[i], "--");
-        lv_obj_set_pos(weather_daily_rain_[i], cx, 125);
+        lv_label_set_text(weather_daily_rain_[i], "");
+        lv_obj_set_pos(weather_daily_rain_[i], cx, 152);
     }
 
     // Astronomy verdict at bottom
@@ -1293,7 +1314,7 @@ void SkyGuardDisplay::Setup() {
     lv_label_set_text(weather_verdict_, "");
     lv_obj_set_width(weather_verdict_, content_w);
     lv_obj_set_style_text_align(weather_verdict_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(weather_verdict_, 0, 137);
+    lv_obj_set_pos(weather_verdict_, 0, 163);
 
     weather_built_ = true;
     HideWeatherBars();
@@ -1857,23 +1878,19 @@ void SkyGuardDisplay::DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* 
 
     if (clouds < 25 && !has_rain && !has_snow) {
         // ===== CLEAR SKY — bright sun with rays =====
-        int cx = 16, cy = 14;
-        // Glow halo
-        fillCircle(cx, cy, 11.0f, sun_glow);
-        // Core
-        fillCircle(cx, cy, 7.0f, sun_core);
-        // Bright center highlight
-        fillCircle(cx - 2, cy - 2, 3.0f, lv_color_hex(0xFFFFCC));
-        // 8 rays
+        int cx = S/2, cy = S/2;
+        fillCircle(cx, cy, S*0.40f, sun_glow);
+        fillCircle(cx, cy, S*0.28f, sun_core);
+        fillCircle(cx-2, cy-2, S*0.12f, lv_color_hex(0xFFFFCC));
+        // 8 rays (scaled)
         for (int a = 0; a < 8; a++) {
             float angle = a * 3.14159f / 4.0f;
-            for (int k = 10; k <= 14; k++) {
+            for (int k = (int)(S*0.38f); k <= (int)(S*0.48f); k++) {
                 int rx = cx + (int)(k * cosf(angle));
                 int ry = cy + (int)(k * sinf(angle));
                 if (rx >= 0 && rx < S && ry >= 0 && ry < S) {
-                    lv_opa_t opa = (lv_opa_t)(255 - (k - 10) * 50);
+                    lv_opa_t opa = (lv_opa_t)(255 - (k - (int)(S*0.38f)) * 40);
                     lv_canvas_set_px(canvas, rx, ry, sun_core, opa);
-                    // Thicker rays: adjacent pixels
                     if (rx+1 < S) lv_canvas_set_px(canvas, rx+1, ry, sun_glow, opa/2);
                     if (ry+1 < S) lv_canvas_set_px(canvas, rx, ry+1, sun_glow, opa/2);
                 }
@@ -1881,58 +1898,60 @@ void SkyGuardDisplay::DrawWeatherIcon(lv_obj_t* canvas, int clouds, const char* 
         }
     } else if (clouds < 50 && !has_rain && !has_snow) {
         // ===== PARTLY CLOUDY — sun peeking + cloud =====
-        // Sun (top-left, partially visible)
-        fillCircle(10, 8, 7.0f, sun_glow);
-        fillCircle(10, 8, 5.0f, sun_core);
-        fillCircle(9, 7, 2.0f, lv_color_hex(0xFFFFCC));
-        // Rays (3 visible ones)
+        int sx = S*3/10, sy = S*3/10;
+        fillCircle(sx, sy, S*0.28f, sun_glow);
+        fillCircle(sx, sy, S*0.20f, sun_core);
+        fillCircle(sx-1, sy-1, S*0.08f, lv_color_hex(0xFFFFCC));
         for (int a = 0; a < 5; a++) {
             float angle = a * 3.14159f / 4.0f - 0.4f;
-            for (int k = 8; k <= 11; k++) {
-                int rx = 10 + (int)(k * cosf(angle));
-                int ry = 8 + (int)(k * sinf(angle));
+            for (int k = (int)(S*0.28f); k <= (int)(S*0.38f); k++) {
+                int rx = sx + (int)(k * cosf(angle));
+                int ry = sy + (int)(k * sinf(angle));
                 if (rx >= 0 && rx < S && ry >= 0 && ry < S)
                     lv_canvas_set_px(canvas, rx, ry, sun_core, 180);
             }
         }
-        // Cloud (lower-right, overlapping sun)
-        drawCloud(18, 20, 1.0f, cloud_hi, cloud_lo);
+        drawCloud(S*9/16, S*5/8, S/20.0f, cloud_hi, cloud_lo);
     } else {
         // ===== CLOUDY / OVERCAST / RAIN / SNOW =====
         lv_color_t top = (clouds > 70) ? cloud_lo : cloud_hi;
         lv_color_t bot = (clouds > 70) ? dark_cloud : cloud_lo;
-        drawCloud(16, 14, 1.3f, top, bot);
+        float cscale = S / 16.0f;
+        drawCloud(S/2, S*7/16, cscale, top, bot);
 
         if (has_rain) {
-            // Rain drops — 2px tall blue streaks
-            const int drops[][2] = {{8,24},{12,25},{16,23},{20,26},{24,24},{10,28},{15,29},{21,28}};
+            int dy = S*3/4;
+            const int drops[][2] = {{S*2/8,dy},{S*3/8,dy+2},{S*4/8,dy-1},{S*5/8,dy+3},{S*6/8,dy+1},
+                                    {S*3/10,dy+5},{S*5/10,dy+6},{S*7/10,dy+4}};
             for (auto& dp : drops) {
-                if (dp[1] < S && dp[1]+1 < S) {
+                if (dp[0] >= 0 && dp[0] < S && dp[1] >= 0 && dp[1]+2 < S) {
                     lv_canvas_set_px(canvas, dp[0], dp[1], rain_col, LV_OPA_COVER);
-                    lv_canvas_set_px(canvas, dp[0], dp[1]+1, rain_col, 200);
+                    lv_canvas_set_px(canvas, dp[0], dp[1]+1, rain_col, 220);
+                    lv_canvas_set_px(canvas, dp[0], dp[1]+2, rain_col, 140);
                 }
             }
             if (has_thunder) {
-                // Lightning bolt — zig-zag
-                const int bolt[][2] = {{15,20},{14,22},{16,23},{14,25},{13,27},{15,28}};
+                int bx = S*7/16;
+                const int bolt[][2] = {{bx,S*5/8},{bx-1,S*11/16},{bx+1,S*3/4},{bx-1,S*13/16},{bx-2,S*7/8},{bx,S*15/16}};
                 for (auto& bp : bolt) {
-                    if (bp[0] >= 0 && bp[0] < S && bp[1] >= 0 && bp[1] < S)
+                    if (bp[0] >= 0 && bp[0]+1 < S && bp[1] >= 0 && bp[1] < S) {
                         lv_canvas_set_px(canvas, bp[0], bp[1], bolt_col, LV_OPA_COVER);
-                    if (bp[0]+1 < S && bp[1] >= 0 && bp[1] < S)
                         lv_canvas_set_px(canvas, bp[0]+1, bp[1], bolt_col, 180);
+                    }
                 }
             }
         } else if (has_snow) {
-            // Snowflakes — 3x3 cross pattern
-            const int flakes[][2] = {{9,24},{15,26},{21,24},{12,29},{18,28}};
+            int dy = S*3/4;
+            const int flakes[][2] = {{S*2/8,dy},{S*4/8,dy+2},{S*6/8,dy},{S*3/8,dy+5},{S*5/8,dy+4}};
             for (auto& fp : flakes) {
                 int fx = fp[0], fy = fp[1];
-                if (fx >= 0 && fx < S && fy >= 0 && fy < S)
+                if (fx >= 1 && fx+1 < S && fy >= 1 && fy+1 < S) {
                     lv_canvas_set_px(canvas, fx, fy, snow_col, LV_OPA_COVER);
-                if (fx-1 >= 0) lv_canvas_set_px(canvas, fx-1, fy, snow_col, 160);
-                if (fx+1 < S) lv_canvas_set_px(canvas, fx+1, fy, snow_col, 160);
-                if (fy-1 >= 0) lv_canvas_set_px(canvas, fx, fy-1, snow_col, 160);
-                if (fy+1 < S) lv_canvas_set_px(canvas, fx, fy+1, snow_col, 160);
+                    lv_canvas_set_px(canvas, fx-1, fy, snow_col, 160);
+                    lv_canvas_set_px(canvas, fx+1, fy, snow_col, 160);
+                    lv_canvas_set_px(canvas, fx, fy-1, snow_col, 160);
+                    lv_canvas_set_px(canvas, fx, fy+1, snow_col, 160);
+                }
             }
         }
     }
@@ -2290,6 +2309,7 @@ void SkyGuardDisplay::ClearDataArea() {
     HideDashboard();
     HideSpectralBars();
     HideWeatherBars();
+    DismissWeatherPopup();
     HideWindPage();
     HideRadar();
     HideSatDome();
@@ -3707,6 +3727,96 @@ void SkyGuardDisplay::UpdatePageWeather() {
         lv_label_set_text(weather_verdict_, verdict);
         lv_obj_set_style_text_color(weather_verdict_, vcolor, 0);
     }
+}
+
+// ==========================================================================
+// WEATHER DETAIL POPUP (on tap)
+// ==========================================================================
+
+void SkyGuardDisplay::DismissWeatherPopup() {
+    if (weather_popup_) {
+        lv_obj_delete(weather_popup_);
+        weather_popup_ = nullptr;
+    }
+}
+
+void SkyGuardDisplay::ShowWeatherPopup(int idx, bool is_daily) {
+    DismissWeatherPopup();
+    if (!weather_ || !weather_->HasData()) return;
+
+    ForecastData fc = weather_->GetForecast();
+    char buf[256];
+
+    weather_popup_ = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(weather_popup_, 260, 140);
+    lv_obj_center(weather_popup_);
+    lv_obj_set_style_bg_color(weather_popup_, lv_color_hex(0x111133), 0);
+    lv_obj_set_style_bg_opa(weather_popup_, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(weather_popup_, 12, 0);
+    lv_obj_set_style_border_color(weather_popup_, SG_TITLE_COLOR, 0);
+    lv_obj_set_style_border_width(weather_popup_, 2, 0);
+    lv_obj_set_style_pad_all(weather_popup_, 10, 0);
+    lv_obj_clear_flag(weather_popup_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(weather_popup_, LV_OBJ_FLAG_CLICKABLE);
+
+    // Tap to dismiss
+    lv_obj_add_event_cb(weather_popup_, [](lv_event_t* e) {
+        auto* self = (SkyGuardDisplay*)lv_event_get_user_data(e);
+        self->DismissWeatherPopup();
+    }, LV_EVENT_CLICKED, this);
+
+    if (is_daily && idx < fc.daily_count) {
+        auto& d = fc.daily[idx];
+        snprintf(buf, sizeof(buf),
+            "%s\n"
+            "Temp: %.0f\xC2\xB0 / %.0f\xC2\xB0\n"
+            "Nubi: %d%%  Umidita: %d%%\n"
+            "Pioggia: %d%% (%.1fmm)\n"
+            "Vento max: %.0f km/h\n"
+            "%s",
+            d.day_str,
+            d.temp_min, d.temp_max,
+            d.clouds_avg, d.humidity_avg,
+            d.pop_max, d.rain_total,
+            d.wind_max * 3.6f,
+            d.description);
+    } else if (!is_daily && idx < fc.count) {
+        auto& e = fc.entries[idx];
+        float wk = e.wind_speed * 3.6f;
+        float gk = e.wind_gust * 3.6f;
+        static const char* dirNames[] = {"N","NNE","NE","ENE","E","ESE","SE","SSE",
+                                         "S","SSW","SW","WSW","W","WNW","NW","NNW"};
+        int di = ((e.wind_deg + 11) % 360) / 22;
+        if (di > 15) di = 0;
+
+        snprintf(buf, sizeof(buf),
+            "%s\n"
+            "Temp: %.1f\xC2\xB0  Umidita: %d%%\n"
+            "Nubi: %d%%  Visibilita: %.0fkm\n"
+            "Pioggia: %d%% (%.1fmm)\n"
+            "Vento: %.0f km/h %s  Raff: %.0f\n"
+            "Pressione: %.0f hPa\n"
+            "%s",
+            e.time_str,
+            e.temp, e.humidity,
+            e.clouds, e.visibility / 1000.0f,
+            e.pop, e.rain_3h,
+            wk, dirNames[di], gk,
+            e.pressure,
+            e.description);
+    } else {
+        snprintf(buf, sizeof(buf), "Nessun dato");
+    }
+
+    lv_obj_t* lbl = lv_label_create(weather_popup_);
+    lv_obj_set_style_text_font(lbl, GetTinyFont(), 0);
+    lv_obj_set_style_text_color(lbl, SG_TEXT_COLOR, 0);
+    lv_label_set_text(lbl, buf);
+    lv_obj_set_width(lbl, 240);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    ESP_LOGI(TAG, "Weather popup: %s idx=%d", is_daily ? "daily" : "hourly", idx);
 }
 
 // ==========================================================================
