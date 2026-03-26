@@ -24,6 +24,8 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_timer.h>
+#include <esp_http_server.h>
+#include <esp_wifi.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -308,6 +310,120 @@ static void send_cmd(RobotCmdType type, int val = 0) {
 }
 
 // ============================================================
+//  WEB SERVER — Stato robot + comandi
+// ============================================================
+
+static httpd_handle_t webserver = nullptr;
+
+static const char* WEBUI_HTML = R"rawhtml(
+<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EnzoBot</title>
+<style>
+body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;margin:0;padding:16px}
+h1{color:#55aaff;margin:0 0 12px}
+.card{background:#111122;border:1px solid #2a2a44;border-radius:10px;padding:12px;margin:8px 0}
+.row{display:flex;justify-content:space-between;padding:4px 0}
+.lbl{color:#667}
+.val{color:#fff;font-weight:bold}
+.ok{color:#0d6}
+.warn{color:#fb0}
+.err{color:#f33}
+button{background:#1a3366;color:#fff;border:none;border-radius:8px;padding:10px 20px;margin:4px;font-size:14px;cursor:pointer}
+button:active{background:#2255aa}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;max-width:300px;margin:8px auto}
+</style></head><body>
+<h1>&#129302; EnzoBot</h1>
+<div class="card">
+<div class="row"><span class="lbl">Stato</span><span class="val" id="st">--</span></div>
+<div class="row"><span class="lbl">IP</span><span class="val" id="ip">--</span></div>
+<div class="row"><span class="lbl">Server</span><span class="val" id="srv">--</span></div>
+<div class="row"><span class="lbl">Motori</span><span class="val" id="mot">--</span></div>
+<div class="row"><span class="lbl">Velocita</span><span class="val" id="spd">--</span></div>
+<div class="row"><span class="lbl">Heap</span><span class="val" id="heap">--</span></div>
+</div>
+<h2>Comandi</h2>
+<div class="grid">
+<button onclick="cmd('forward')">&#8593; Avanti</button>
+<button onclick="cmd('stop')">&#9632; Stop</button>
+<button onclick="cmd('backward')">&#8595; Indietro</button>
+<button onclick="cmd('left')">&#8592; Sinistra</button>
+<button onclick="cmd('rotate_left')">&#8634; Ruota SX</button>
+<button onclick="cmd('right')">&#8594; Destra</button>
+<button onclick="cmd('rotate_right')">&#8635; Ruota DX</button>
+</div>
+<script>
+function cmd(c){fetch('/cmd?a='+c).then(r=>r.text()).then(t=>document.getElementById('st').textContent=t)}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{
+document.getElementById('st').textContent=d.state;
+document.getElementById('ip').textContent=d.ip;
+document.getElementById('srv').textContent=d.server;
+document.getElementById('mot').textContent=d.motors_en?'ON':'OFF';
+document.getElementById('spd').textContent=d.speed;
+document.getElementById('heap').textContent=d.heap;
+}).catch(e=>{})}
+setInterval(poll,2000);poll();
+</script></body></html>
+)rawhtml";
+
+static esp_err_t webui_handler(httpd_req_t* req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, WEBUI_HTML, strlen(WEBUI_HTML));
+    return ESP_OK;
+}
+
+static esp_err_t status_handler(httpd_req_t* req) {
+    char buf[256];
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif) esp_netif_get_ip_info(netif, &ip_info);
+    snprintf(buf, sizeof(buf),
+        "{\"state\":\"%s\",\"ip\":\"" IPSTR "\",\"server\":\"enzobot.xamad.net\","
+        "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu}",
+        robot_state.motors_enabled ? "attivo" : "disabilitato",
+        IP2STR(&ip_info.ip),
+        robot_state.motors_enabled ? "true" : "false",
+        CRUISE_SPEED,
+        (unsigned long)esp_get_free_heap_size());
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, strlen(buf));
+    return ESP_OK;
+}
+
+static esp_err_t cmd_handler(httpd_req_t* req) {
+    char param[32] = {};
+    if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
+        char action[16] = {};
+        httpd_query_key_value(param, "a", action, sizeof(action));
+        if (strcmp(action, "forward") == 0) send_cmd(CMD_FORWARD);
+        else if (strcmp(action, "backward") == 0) send_cmd(CMD_BACKWARD);
+        else if (strcmp(action, "left") == 0) send_cmd(CMD_LEFT);
+        else if (strcmp(action, "right") == 0) send_cmd(CMD_RIGHT);
+        else if (strcmp(action, "rotate_left") == 0) send_cmd(CMD_ROTATE_L);
+        else if (strcmp(action, "rotate_right") == 0) send_cmd(CMD_ROTATE_R);
+        else if (strcmp(action, "stop") == 0) send_cmd(CMD_STOP);
+        httpd_resp_sendstr(req, action);
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, "no action");
+    return ESP_OK;
+}
+
+static void start_webserver() {
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = 8192;
+    if (httpd_start(&webserver, &config) == ESP_OK) {
+        httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = webui_handler};
+        httpd_register_uri_handler(webserver, &root);
+        httpd_uri_t status = {.uri = "/status", .method = HTTP_GET, .handler = status_handler};
+        httpd_register_uri_handler(webserver, &status);
+        httpd_uri_t cmd = {.uri = "/cmd", .method = HTTP_GET, .handler = cmd_handler};
+        httpd_register_uri_handler(webserver, &cmd);
+        ESP_LOGI(TAG, "WebUI attiva su porta 80");
+    }
+}
+
+// ============================================================
 //  ENZOBOT BOARD
 // ============================================================
 
@@ -377,6 +493,21 @@ public:
 
         // TODO: boot sound (enzobot.ogg va aggiunto come EMBED_FILES nel CMakeLists)
         ESP_LOGI(TAG, "EnzoBot ready (boot sound skipped)");
+
+        // WebUI — avvia dopo connessione WiFi (task asincrono)
+        xTaskCreate([](void* p) {
+            // Aspetta che l'IP sia assegnato
+            for (int i = 0; i < 30; i++) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                if (netif) {
+                    esp_netif_ip_info_t ip;
+                    if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) break;
+                }
+            }
+            start_webserver();
+            vTaskDelete(nullptr);
+        }, "webui", 4096, nullptr, 2, nullptr);
     }
 
     AudioCodec* GetAudioCodec() override {
