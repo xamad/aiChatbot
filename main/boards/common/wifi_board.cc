@@ -54,7 +54,13 @@ void WifiBoard::StartNetwork() {
 
     // Initialize WiFi manager
     WifiManagerConfig config;
+    #if defined(CONFIG_BOARD_TYPE_ENZOBOT)
+    config.ssid_prefix = "EnzoBot";
+    #elif defined(CONFIG_BOARD_TYPE_SKYGUARD_ELITE)
     config.ssid_prefix = "SkyGuard";
+    #else
+    config.ssid_prefix = "Xiaozhi";
+    #endif
     config.language = Lang::CODE;
     wifi_manager.Initialize(config);
 
