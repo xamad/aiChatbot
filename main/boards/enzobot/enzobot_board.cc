@@ -315,23 +315,37 @@ static void send_cmd(RobotCmdType type, int val = 0) {
 
 static httpd_handle_t webserver = nullptr;
 
+static int current_volume = 80;
+static int us_threshold = US_WARNING_DIST;
+
 static const char* WEBUI_HTML = R"rawhtml(
 <!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EnzoBot</title>
 <style>
-body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;margin:0;padding:16px}
-h1{color:#55aaff;margin:0 0 12px}
-.card{background:#111122;border:1px solid #2a2a44;border-radius:10px;padding:12px;margin:8px 0}
-.row{display:flex;justify-content:space-between;padding:4px 0}
+*{box-sizing:border-box}
+body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;margin:0;padding:12px;max-width:480px;margin:0 auto}
+h1{color:#55aaff;margin:0 0 8px;font-size:22px}
+h2{color:#88aacc;margin:12px 0 6px;font-size:16px}
+.card{background:#111122;border:1px solid #2a2a44;border-radius:10px;padding:10px;margin:6px 0}
+.row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
 .lbl{color:#667}
 .val{color:#fff;font-weight:bold}
-.ok{color:#0d6}
-.warn{color:#fb0}
-.err{color:#f33}
-button{background:#1a3366;color:#fff;border:none;border-radius:8px;padding:10px 20px;margin:4px;font-size:14px;cursor:pointer}
+.ok{color:#0d6}.warn{color:#fb0}.err{color:#f33}
+button{background:#1a3366;color:#fff;border:none;border-radius:8px;padding:10px 16px;margin:3px;font-size:14px;cursor:pointer;min-width:80px}
 button:active{background:#2255aa}
-.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;max-width:300px;margin:8px auto}
+.stop{background:#882222}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;max-width:300px;margin:6px auto}
+input[type=range]{width:100%;accent-color:#55aaff}
+.sensors{display:flex;gap:8px;flex-wrap:wrap}
+.sensor{flex:1;min-width:70px;text-align:center;padding:6px;border-radius:8px;background:#0a0a1a;border:2px solid #222}
+.sensor.alert{border-color:#f33;background:#1a0505}
+.sensor .dist{font-size:20px;font-weight:bold}
+.sensor .name{font-size:10px;color:#667}
+.compass{width:80px;height:80px;margin:0 auto;position:relative}
+.compass .arrow{position:absolute;left:50%;top:50%;width:4px;height:36px;background:#55aaff;transform-origin:bottom center;border-radius:2px;margin-left:-2px;margin-top:-36px;transition:transform 0.3s}
+.compass .ring{width:80px;height:80px;border:2px solid #334;border-radius:50%;position:relative}
+.compass .n{position:absolute;top:-2px;left:50%;transform:translateX(-50%);font-size:10px;color:#88a}
 </style></head><body>
 <h1>&#129302; EnzoBot</h1>
 <div class="card">
@@ -339,19 +353,44 @@ button:active{background:#2255aa}
 <div class="row"><span class="lbl">IP</span><span class="val" id="ip">--</span></div>
 <div class="row"><span class="lbl">Server</span><span class="val" id="srv">--</span></div>
 <div class="row"><span class="lbl">Motori</span><span class="val" id="mot">--</span></div>
-<div class="row"><span class="lbl">Velocita</span><span class="val" id="spd">--</span></div>
-<div class="row"><span class="lbl">Heap</span><span class="val" id="heap">--</span></div>
 </div>
-<h2>Comandi</h2>
+
+<h2>&#127925; Volume: <span id="vv">80</span>%</h2>
+<input type="range" min="0" max="100" value="80" id="vol" oninput="document.getElementById('vv').textContent=this.value" onchange="fetch('/cmd?a=volume&v='+this.value)">
+
+<h2>&#128663; Controllo</h2>
 <div class="grid">
 <button onclick="cmd('forward')">&#8593; Avanti</button>
-<button onclick="cmd('stop')">&#9632; Stop</button>
+<button class="stop" onclick="cmd('stop')">&#9632; Stop</button>
 <button onclick="cmd('backward')">&#8595; Indietro</button>
 <button onclick="cmd('left')">&#8592; Sinistra</button>
 <button onclick="cmd('rotate_left')">&#8634; Ruota SX</button>
 <button onclick="cmd('right')">&#8594; Destra</button>
 <button onclick="cmd('rotate_right')">&#8635; Ruota DX</button>
 </div>
+
+<h2>&#128225; Sensori Ultrasuoni</h2>
+<div class="card">
+<div class="sensors">
+<div class="sensor" id="us_r"><div class="dist" id="dr">--</div><div class="name">Dietro</div></div>
+<div class="sensor" id="us_l"><div class="dist" id="dl">--</div><div class="name">Sinistra</div></div>
+<div class="sensor" id="us_rt"><div class="dist" id="drt">--</div><div class="name">Destra</div></div>
+</div>
+<div style="margin-top:8px">
+<span class="lbl">Soglia allarme: <span id="tv">30</span>cm</span>
+<input type="range" min="5" max="100" value="30" id="thr" oninput="document.getElementById('tv').textContent=this.value" onchange="fetch('/cmd?a=threshold&v='+this.value)">
+</div>
+</div>
+
+<h2>&#129517; Orientamento (MPU6050)</h2>
+<div class="card" style="text-align:center">
+<div class="compass"><div class="ring"><div class="n">N</div><div class="arrow" id="arrow"></div></div></div>
+<div class="row"><span class="lbl">Heading</span><span class="val" id="hdg">--</span></div>
+<div class="row"><span class="lbl">Pitch</span><span class="val" id="pit">--</span></div>
+<div class="row"><span class="lbl">Roll</span><span class="val" id="rol">--</span></div>
+<div class="row"><span class="lbl">Inclinato</span><span class="val" id="tlt">--</span></div>
+</div>
+
 <script>
 function cmd(c){fetch('/cmd?a='+c).then(r=>r.text()).then(t=>document.getElementById('st').textContent=t)}
 function poll(){fetch('/status').then(r=>r.json()).then(d=>{
@@ -359,10 +398,22 @@ document.getElementById('st').textContent=d.state;
 document.getElementById('ip').textContent=d.ip;
 document.getElementById('srv').textContent=d.server;
 document.getElementById('mot').textContent=d.motors_en?'ON':'OFF';
-document.getElementById('spd').textContent=d.speed;
-document.getElementById('heap').textContent=d.heap;
+document.getElementById('dr').textContent=d.dist_r<999?d.dist_r+'cm':'--';
+document.getElementById('dl').textContent=d.dist_l<999?d.dist_l+'cm':'--';
+document.getElementById('drt').textContent=d.dist_rt<999?d.dist_rt+'cm':'--';
+var t=d.threshold||30;
+['us_r','us_l','us_rt'].forEach(function(id,i){
+var v=[d.dist_r,d.dist_l,d.dist_rt][i];
+var el=document.getElementById(id);
+el.className=v<t&&v<999?'sensor alert':'sensor';
+});
+document.getElementById('hdg').textContent=d.heading.toFixed(1)+'\u00B0';
+document.getElementById('pit').textContent=d.pitch.toFixed(1)+'\u00B0';
+document.getElementById('rol').textContent=d.roll.toFixed(1)+'\u00B0';
+document.getElementById('tlt').textContent=d.tilted?'SI':'No';
+document.getElementById('arrow').style.transform='rotate('+d.heading+'deg)';
 }).catch(e=>{})}
-setInterval(poll,2000);poll();
+setInterval(poll,1000);poll();
 </script></body></html>
 )rawhtml";
 
@@ -373,28 +424,38 @@ static esp_err_t webui_handler(httpd_req_t* req) {
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
-    char buf[256];
-    esp_netif_ip_info_t ip_info;
+    char buf[512];
+    esp_netif_ip_info_t ip_info = {};
     esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (netif) esp_netif_get_ip_info(netif, &ip_info);
     snprintf(buf, sizeof(buf),
         "{\"state\":\"%s\",\"ip\":\"" IPSTR "\",\"server\":\"enzobot.xamad.net\","
-        "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu}",
+        "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu,"
+        "\"dist_r\":%d,\"dist_l\":%d,\"dist_rt\":%d,\"threshold\":%d,"
+        "\"heading\":%.1f,\"pitch\":%.1f,\"roll\":%.1f,\"tilted\":%s,"
+        "\"volume\":%d}",
         robot_state.motors_enabled ? "attivo" : "disabilitato",
         IP2STR(&ip_info.ip),
         robot_state.motors_enabled ? "true" : "false",
         CRUISE_SPEED,
-        (unsigned long)esp_get_free_heap_size());
+        (unsigned long)esp_get_free_heap_size(),
+        robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
+        us_threshold,
+        robot_state.heading, robot_state.pitch, robot_state.roll,
+        robot_state.tilted ? "true" : "false",
+        current_volume);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, strlen(buf));
     return ESP_OK;
 }
 
 static esp_err_t cmd_handler(httpd_req_t* req) {
-    char param[32] = {};
+    char param[64] = {};
     if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
-        char action[16] = {};
+        char action[20] = {};
+        char value[10] = {};
         httpd_query_key_value(param, "a", action, sizeof(action));
+        httpd_query_key_value(param, "v", value, sizeof(value));
         if (strcmp(action, "forward") == 0) send_cmd(CMD_FORWARD);
         else if (strcmp(action, "backward") == 0) send_cmd(CMD_BACKWARD);
         else if (strcmp(action, "left") == 0) send_cmd(CMD_LEFT);
@@ -402,6 +463,22 @@ static esp_err_t cmd_handler(httpd_req_t* req) {
         else if (strcmp(action, "rotate_left") == 0) send_cmd(CMD_ROTATE_L);
         else if (strcmp(action, "rotate_right") == 0) send_cmd(CMD_ROTATE_R);
         else if (strcmp(action, "stop") == 0) send_cmd(CMD_STOP);
+        else if (strcmp(action, "volume") == 0) {
+            int v = atoi(value);
+            if (v >= 0 && v <= 100) {
+                current_volume = v;
+                auto* codec = Board::GetInstance().GetAudioCodec();
+                if (codec) codec->SetOutputVolume(v);
+                ESP_LOGI(TAG, "Volume: %d%%", v);
+            }
+        }
+        else if (strcmp(action, "threshold") == 0) {
+            int t = atoi(value);
+            if (t >= 5 && t <= 200) {
+                us_threshold = t;
+                ESP_LOGI(TAG, "US threshold: %dcm", t);
+            }
+        }
         httpd_resp_sendstr(req, action);
         return ESP_OK;
     }
@@ -494,18 +571,26 @@ public:
         // TODO: boot sound (enzobot.ogg va aggiunto come EMBED_FILES nel CMakeLists)
         ESP_LOGI(TAG, "EnzoBot ready (boot sound skipped)");
 
-        // WebUI — avvia dopo connessione WiFi (task asincrono)
+        // WebUI + OLED IP — avvia dopo connessione WiFi
         xTaskCreate([](void* p) {
             // Aspetta che l'IP sia assegnato
+            esp_netif_ip_info_t ip = {};
             for (int i = 0; i < 30; i++) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-                if (netif) {
-                    esp_netif_ip_info_t ip;
-                    if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) break;
-                }
+                if (netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) break;
             }
             start_webserver();
+
+            // Mostra IP sull'OLED dopo attivazione
+            if (ip.ip.addr != 0) {
+                vTaskDelay(pdMS_TO_TICKS(3000));  // Aspetta che l'attivazione finisca
+                char ip_str[40];
+                snprintf(ip_str, sizeof(ip_str), "IP: " IPSTR, IP2STR(&ip.ip));
+                auto* display = Board::GetInstance().GetDisplay();
+                if (display) display->SetStatus(ip_str);
+                ESP_LOGI("EnzoBot", "OLED: %s", ip_str);
+            }
             vTaskDelete(nullptr);
         }, "webui", 4096, nullptr, 2, nullptr);
     }

@@ -71,10 +71,10 @@
 
 // === PARAMETRI MOVIMENTO ===
 #define MAX_SPEED                   255
-#define CRUISE_SPEED                180
-#define SLOW_SPEED                  100
-#define MIN_SPEED                   60
-#define PWM_FREQ_HZ                 1000
+#define CRUISE_SPEED                255
+#define SLOW_SPEED                  150
+#define MIN_SPEED                   100
+#define PWM_FREQ_HZ                 5000
 #define PWM_RESOLUTION_BITS         8
 
 // === SOGLIE SENSORI ===
