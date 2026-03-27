@@ -348,8 +348,8 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
             return 0;
         }
 
-        // Volume scaling: linear 0-100 -> 0.0-1.0 (no exponential curve)
-        float volume_scale = float(output_volume_) / 100.0f;
+        // Volume scaling: linear 0-100 -> 0.0-2.0 (with 2x gain boost for MAX98357A)
+        float volume_scale = float(output_volume_) / 100.0f * 2.0f;
 
         for (int i = 0; i < samples; i++) {
             int32_t temp = int32_t(data[i]) * volume_scale;

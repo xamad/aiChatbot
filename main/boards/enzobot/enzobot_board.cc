@@ -69,7 +69,7 @@ static QueueHandle_t cmd_queue = nullptr;
 static volatile RobotState robot_state = {};
 
 // ============================================================
-//  MOTORI L298N (2 board separate)
+//  MOTORI DC via L298N singolo (canale A = SX, canale B = DX)
 // ============================================================
 
 static void init_motors() {
@@ -246,23 +246,24 @@ static void motor_task(void* arg) {
     ESP_LOGI(TAG, "Motor task pronto!");
 
     int spd = CRUISE_SPEED;
-    uint32_t last_us = 0, last_k230 = 0;
     RobotCmd cmd;
 
     while (true) {
-        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
         // Comandi dalla coda
         while (xQueueReceive(cmd_queue, &cmd, 0) == pdTRUE) {
             switch (cmd.type) {
                 case CMD_STOP:      set_motors(0, 0); break;
                 case CMD_FORWARD:   set_motors(spd, spd); break;
                 case CMD_BACKWARD:  set_motors(-spd, -spd); break;
-                case CMD_LEFT:      set_motors(-spd/2, spd); break;
-                case CMD_RIGHT:     set_motors(spd, -spd/2); break;
+                case CMD_LEFT:      set_motors(spd/3, spd); break;
+                case CMD_RIGHT:     set_motors(spd, spd/3); break;
                 case CMD_ROTATE_L:  set_motors(-spd, spd); break;
                 case CMD_ROTATE_R:  set_motors(spd, -spd); break;
-                case CMD_SET_SPEED: spd = cmd.value; break;
+                case CMD_SET_SPEED: {
+                    spd = cmd.value < MIN_SPEED ? MIN_SPEED : (cmd.value > MAX_SPEED ? MAX_SPEED : cmd.value);
+                    ESP_LOGI(TAG, "Speed: %d", spd);
+                    break;
+                }
                 case CMD_GOTO_TABLE: {
                     char b[64]; snprintf(b, 64, "{\"cmd\":\"goto_table\",\"table\":%d}", cmd.value);
                     k230_send(b);
@@ -285,13 +286,7 @@ static void motor_task(void* arg) {
             }
         }
 
-        // Ultrasuoni: disabilitati finche' non inizializzati
-        // TODO: aggiungere comando MCP per attivare sensori runtime
-
-        // K230: disabilitata finche' non inizializzata
-        // TODO: aggiungere init K230 lazy quando collegata
-
-        vTaskDelay(pdMS_TO_TICKS(50));  // yield per watchdog IDLE1
+        vTaskDelay(pdMS_TO_TICKS(50));  // yield per watchdog
     }
 }
 
@@ -539,11 +534,14 @@ private:
         esp_lcd_panel_ssd1306_config_t ssd_cfg = { .height = DISPLAY_HEIGHT };
         panel_cfg.vendor_config = &ssd_cfg;
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_cfg, &panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, false));
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+        esp_err_t ret = esp_lcd_new_panel_ssd1306(panel_io_, &panel_cfg, &panel_);
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED SSD1306 non trovato!"); return; }
+        ret = esp_lcd_panel_reset(panel_);
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED reset fallito"); return; }
+        ret = esp_lcd_panel_init(panel_);
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED init fallito — display scollegato?"); return; }
+        esp_lcd_panel_invert_color(panel_, false);
+        esp_lcd_panel_disp_on_off(panel_, true);
 
         display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);

@@ -34,15 +34,13 @@
 #define BOOT_BUTTON_GPIO            GPIO_NUM_0
 #define BUILTIN_LED_GPIO            GPIO_NUM_NC
 
-// === L298N MOTORE SINISTRO (Board 1, canale A) ===
-#define MOT_L_ENA                   GPIO_NUM_1
-#define MOT_L_IN1                   GPIO_NUM_2
-#define MOT_L_IN2                   GPIO_NUM_3
-
-// === L298N MOTORE DESTRO (Board 2, canale A) ===
-#define MOT_R_ENA                   GPIO_NUM_6
-#define MOT_R_IN1                   GPIO_NUM_4
-#define MOT_R_IN2                   GPIO_NUM_5
+// === L298N SINGOLO — 2 motori DC (canale A = SX, canale B = DX) ===
+#define MOT_L_ENA                   GPIO_NUM_1   // PWM velocità SX
+#define MOT_L_IN1                   GPIO_NUM_2   // Direzione SX
+#define MOT_L_IN2                   GPIO_NUM_3   // Direzione SX
+#define MOT_R_IN1                   GPIO_NUM_4   // Direzione DX
+#define MOT_R_IN2                   GPIO_NUM_5   // Direzione DX
+#define MOT_R_ENA                   GPIO_NUM_6   // PWM velocità DX
 
 // === SENSORI ULTRASUONI (3x HC-SR04) ===
 #define US_REAR_TRIG                GPIO_NUM_7
@@ -69,11 +67,11 @@
 // === MPU6050 (I2C condiviso con OLED) ===
 #define MPU6050_ADDR                0x68
 
-// === PARAMETRI MOVIMENTO ===
+// === PARAMETRI MOTORI DC ===
 #define MAX_SPEED                   255
-#define CRUISE_SPEED                255
-#define SLOW_SPEED                  150
-#define MIN_SPEED                   100
+#define CRUISE_SPEED                200
+#define SLOW_SPEED                  120
+#define MIN_SPEED                   80
 #define PWM_FREQ_HZ                 5000
 #define PWM_RESOLUTION_BITS         8
 
