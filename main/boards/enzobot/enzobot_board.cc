@@ -535,14 +535,18 @@ private:
         panel_cfg.vendor_config = &ssd_cfg;
 
         esp_err_t ret = esp_lcd_new_panel_ssd1306(panel_io_, &panel_cfg, &panel_);
-        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED SSD1306 non trovato!"); return; }
-        ret = esp_lcd_panel_reset(panel_);
-        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED reset fallito"); return; }
-        ret = esp_lcd_panel_init(panel_);
-        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED init fallito — display scollegato?"); return; }
-        esp_lcd_panel_invert_color(panel_, false);
-        esp_lcd_panel_disp_on_off(panel_, true);
-
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "OLED SSD1306 non trovato — continuo senza display"); }
+        else {
+            ret = esp_lcd_panel_reset(panel_);
+            if (ret == ESP_OK) ret = esp_lcd_panel_init(panel_);
+            if (ret == ESP_OK) {
+                esp_lcd_panel_invert_color(panel_, false);
+                esp_lcd_panel_disp_on_off(panel_, true);
+            } else {
+                ESP_LOGE(TAG, "OLED init fallito — display scollegato?");
+            }
+        }
+        // Crea display comunque (XiaoZhi richiede display non-null)
         display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
     }
