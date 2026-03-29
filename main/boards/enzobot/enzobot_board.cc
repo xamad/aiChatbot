@@ -360,85 +360,135 @@ static int us_threshold = US_WARNING_DIST;
 
 static const char* WEBUI_HTML = R"rawhtml(
 <!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>EnzoBot</title>
 <style>
-*{box-sizing:border-box}
-body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;margin:0;padding:12px;max-width:480px;margin:0 auto}
-h1{color:#55aaff;margin:0 0 8px;font-size:22px}
-h2{color:#88aacc;margin:12px 0 6px;font-size:16px}
-.card{background:#111122;border:1px solid #2a2a44;border-radius:10px;padding:10px;margin:6px 0}
-.row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
-.lbl{color:#667}
-.val{color:#fff;font-weight:bold}
-.ok{color:#0d6}.warn{color:#fb0}.err{color:#f33}
-button{background:#1a3366;color:#fff;border:none;border-radius:8px;padding:10px 16px;margin:3px;font-size:14px;cursor:pointer;min-width:80px}
-button:active{background:#2255aa}
-.stop{background:#882222}
-.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;max-width:300px;margin:6px auto}
-input[type=range]{width:100%;accent-color:#55aaff}
-.sensors{display:flex;gap:8px;flex-wrap:wrap}
-.sensor{flex:1;min-width:70px;text-align:center;padding:6px;border-radius:8px;background:#0a0a1a;border:2px solid #222}
-.sensor.alert{border-color:#f33;background:#1a0505}
-.sensor .dist{font-size:20px;font-weight:bold}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;margin:0;padding:10px;max-width:480px;margin:0 auto}
+h1{color:#55aaff;margin:0 0 6px;font-size:20px}
+h2{color:#88aacc;margin:10px 0 4px;font-size:14px;display:flex;align-items:center;gap:6px}
+.card{background:#111122;border:1px solid #2a2a44;border-radius:10px;padding:8px;margin:4px 0}
+.row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px}
+.lbl{color:#667}.val{color:#fff;font-weight:bold}
+.ok{color:#0d6}.warn{color:#fb0}.err{color:#f33}.blue{color:#55aaff}
+button{background:#1a3366;color:#fff;border:none;border-radius:8px;padding:12px 14px;margin:2px;font-size:15px;cursor:pointer;min-width:70px;touch-action:manipulation}
+button:active{background:#2255aa;transform:scale(0.95)}
+button.active{background:#225588;box-shadow:0 0 8px #55aaff}
+.estop{background:#cc0000;font-size:18px;font-weight:bold;padding:14px;width:100%;border-radius:12px;margin:6px 0;letter-spacing:2px}
+.estop:active{background:#ff0000}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}
+.toggle input{display:none}
+.toggle .sw{width:40px;height:22px;background:#333;border-radius:11px;position:relative;transition:0.2s}
+.toggle .sw::after{content:'';width:18px;height:18px;background:#888;border-radius:50%;position:absolute;top:2px;left:2px;transition:0.2s}
+.toggle input:checked+.sw{background:#0a5}
+.toggle input:checked+.sw::after{left:20px;background:#fff}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;max-width:280px;margin:4px auto}
+input[type=range]{width:100%;accent-color:#55aaff;height:24px}
+.sensors{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sensor{text-align:center;padding:8px;border-radius:8px;background:#0a0a1a;border:2px solid #222}
+.sensor.alert{border-color:#f33;background:#1a0505;animation:pulse 1s infinite}
+@keyframes pulse{50%{border-color:#ff6666}}
+.sensor .dist{font-size:22px;font-weight:bold}
 .sensor .name{font-size:10px;color:#667}
-.compass{width:80px;height:80px;margin:0 auto;position:relative}
-.compass .arrow{position:absolute;left:50%;top:50%;width:4px;height:36px;background:#55aaff;transform-origin:bottom center;border-radius:2px;margin-left:-2px;margin-top:-36px;transition:transform 0.3s}
-.compass .ring{width:80px;height:80px;border:2px solid #334;border-radius:50%;position:relative}
-.compass .n{position:absolute;top:-2px;left:50%;transform:translateX(-50%);font-size:10px;color:#88a}
+.compass{width:70px;height:70px;margin:0 auto;position:relative}
+.compass .arrow{position:absolute;left:50%;top:50%;width:3px;height:30px;background:#55aaff;transform-origin:bottom center;border-radius:2px;margin-left:-1.5px;margin-top:-30px;transition:transform 0.3s}
+.compass .ring{width:70px;height:70px;border:2px solid #334;border-radius:50%;position:relative}
+.compass .n{position:absolute;top:-2px;left:50%;transform:translateX(-50%);font-size:9px;color:#88a}
+.delivery{display:flex;gap:10px;align-items:center}
+.delivery .table{font-size:28px;font-weight:bold;color:#55aaff}
+.info{font-size:11px;color:#556;text-align:center;margin-top:8px}
 </style></head><body>
-<h1>&#129302; EnzoBot</h1>
+<h1>&#129302; EnzoBot <span style="font-size:11px;color:#556" id="ver">v2.1</span></h1>
+
+<button class="estop" onclick="cmd('stop')">&#9632; STOP EMERGENZA</button>
+
 <div class="card">
-<div class="row"><span class="lbl">Stato</span><span class="val" id="st">--</span></div>
-<div class="row"><span class="lbl">IP</span><span class="val" id="ip">--</span></div>
-<div class="row"><span class="lbl">Server</span><span class="val" id="srv">--</span></div>
-<div class="row"><span class="lbl">Motori</span><span class="val" id="mot">--</span></div>
+<div class="row"><span class="lbl">Chatbot</span><span class="val" id="chat">--</span></div>
+<div class="row"><span class="lbl">IP</span><span class="val blue" id="ip">--</span></div>
+<div class="row"><span class="lbl">WiFi</span><span class="val" id="rssi">--</span></div>
+<div class="row"><span class="lbl">Heap</span><span class="val" id="heap">--</span></div>
+<div class="row"><span class="lbl">Uptime</span><span class="val" id="up">--</span></div>
+</div>
+
+<div class="card">
+<div class="delivery">
+<div><div class="table" id="tbl">-</div><div style="font-size:10px;color:#667">Tavolo</div></div>
+<div style="flex:1">
+<div class="row"><span class="lbl">Stato</span><span class="val" id="del">idle</span></div>
+<div class="row"><span class="lbl">Consegne</span><span class="val" id="cnt">0</span></div>
+</div>
+</div>
 </div>
 
 <h2>&#127925; Volume: <span id="vv">100</span>%</h2>
 <input type="range" min="0" max="100" value="100" id="vol" oninput="document.getElementById('vv').textContent=this.value" onchange="fetch('/cmd?a=volume&v='+this.value)">
 
-<h2>&#128663; Controllo</h2>
+<h2>&#128663; Controllo
+<label class="toggle"><input type="checkbox" id="men" checked onchange="fetch('/cmd?a='+(this.checked?'enable':'disable'))"><span class="sw"></span>Motori</label>
+</h2>
+<div style="text-align:center;margin:2px 0">
+<span class="lbl">Velocita: <span id="sv">200</span></span>
+<input type="range" min="80" max="255" value="200" id="spd" oninput="document.getElementById('sv').textContent=this.value" onchange="fetch('/cmd?a=speed&v='+this.value)">
+</div>
 <div class="grid">
-<button onclick="cmd('forward')">&#8593; Avanti</button>
-<button class="stop" onclick="cmd('stop')">&#9632; Stop</button>
-<button onclick="cmd('backward')">&#8595; Indietro</button>
-<button onclick="cmd('left')">&#8592; Sinistra</button>
-<button onclick="cmd('rotate_left')">&#8634; Ruota SX</button>
-<button onclick="cmd('right')">&#8594; Destra</button>
-<button onclick="cmd('rotate_right')">&#8635; Ruota DX</button>
+<div></div><button id="bf" onclick="cmd('forward')">&#8593; Avanti</button><div></div>
+<button id="bl" onclick="cmd('left')">&#8592; SX</button>
+<button class="estop" style="font-size:14px;padding:10px;min-width:0" onclick="cmd('stop')">&#9632;</button>
+<button id="br" onclick="cmd('right')">DX &#8594;</button>
+<button id="brl" onclick="cmd('rotate_left')">&#8634;</button>
+<button id="bb" onclick="cmd('backward')">&#8595; Dietro</button>
+<button id="brr" onclick="cmd('rotate_right')">&#8635;</button>
 </div>
 
 <h2>&#128225; Sensori Ultrasuoni</h2>
 <div class="card">
 <div class="sensors">
-<div class="sensor" id="us_f"><div class="dist" id="df">--</div><div class="name">Davanti</div></div>
-<div class="sensor" id="us_l"><div class="dist" id="dl">--</div><div class="name">Sinistra</div></div>
-<div class="sensor" id="us_rt"><div class="dist" id="drt">--</div><div class="name">Destra</div></div>
-<div class="sensor" id="us_r"><div class="dist" id="dr">--</div><div class="name">Dietro</div></div>
+<div class="sensor" id="us_f"><div class="dist" id="df">--</div><div class="name">&#9650; Davanti</div></div>
+<div class="sensor" id="us_r"><div class="dist" id="dr">--</div><div class="name">&#9660; Dietro</div></div>
+<div class="sensor" id="us_l"><div class="dist" id="dl">--</div><div class="name">&#9664; Sinistra</div></div>
+<div class="sensor" id="us_rt"><div class="dist" id="drt">--</div><div class="name">&#9654; Destra</div></div>
 </div>
-<div style="margin-top:8px">
-<span class="lbl">Soglia allarme: <span id="tv">30</span>cm</span>
+<div style="margin-top:6px">
+<span class="lbl">Soglia: <span id="tv">30</span>cm</span>
 <input type="range" min="5" max="100" value="30" id="thr" oninput="document.getElementById('tv').textContent=this.value" onchange="fetch('/cmd?a=threshold&v='+this.value)">
 </div>
 </div>
 
-<h2>&#129517; Orientamento (MPU6050)</h2>
+<h2>&#129517; Bussola</h2>
 <div class="card" style="text-align:center">
 <div class="compass"><div class="ring"><div class="n">N</div><div class="arrow" id="arrow"></div></div></div>
 <div class="row"><span class="lbl">Heading</span><span class="val" id="hdg">--</span></div>
-<div class="row"><span class="lbl">Pitch</span><span class="val" id="pit">--</span></div>
-<div class="row"><span class="lbl">Roll</span><span class="val" id="rol">--</span></div>
+<div class="row"><span class="lbl">Pitch/Roll</span><span class="val"><span id="pit">--</span> / <span id="rol">--</span></span></div>
 <div class="row"><span class="lbl">Inclinato</span><span class="val" id="tlt">--</span></div>
 </div>
 
+<div class="info">EnzoBot &#8212; Robot Cameriere AI &#8212; enzobot.xamad.net</div>
+
 <script>
-function cmd(c){fetch('/cmd?a='+c).then(r=>r.text()).then(t=>document.getElementById('st').textContent=t)}
+var lastDir='';
+function cmd(c){
+fetch('/cmd?a='+c).then(r=>r.text()).then(t=>{
+lastDir=c;hlDir(c);
+document.getElementById('chat').textContent=t;
+})}
+function hlDir(d){
+['bf','bb','bl','br','brl','brr'].forEach(id=>document.getElementById(id).classList.remove('active'));
+var map={forward:'bf',backward:'bb',left:'bl',right:'br',rotate_left:'brl',rotate_right:'brr'};
+if(map[d])document.getElementById(map[d]).classList.add('active');
+if(d==='stop'){lastDir='';['bf','bb','bl','br','brl','brr'].forEach(id=>document.getElementById(id).classList.remove('active'));}
+}
 function poll(){fetch('/status').then(r=>r.json()).then(d=>{
-document.getElementById('st').textContent=d.state;
+document.getElementById('chat').textContent=d.chat||'idle';
+document.getElementById('chat').className='val '+(d.chat==='listening'?'ok':d.chat==='speaking'?'warn':'');
 document.getElementById('ip').textContent=d.ip;
-document.getElementById('srv').textContent=d.server;
-document.getElementById('mot').textContent=d.motors_en?'ON':'OFF';
+document.getElementById('rssi').textContent=d.rssi+'dBm';
+document.getElementById('rssi').className='val '+(d.rssi>-50?'ok':d.rssi>-70?'warn':'err');
+document.getElementById('heap').textContent=(d.heap/1024|0)+'KB';
+document.getElementById('up').textContent=(d.uptime/60|0)+'m '+(d.uptime%60)+'s';
+document.getElementById('men').checked=d.motors_en;
+document.getElementById('tbl').textContent=d.table||'-';
+document.getElementById('del').textContent=d.delivery||'idle';
+document.getElementById('cnt').textContent=d.deliveries||0;
 document.getElementById('df').textContent=d.dist_f<999?d.dist_f+'cm':'--';
 document.getElementById('dl').textContent=d.dist_l<999?d.dist_l+'cm':'--';
 document.getElementById('drt').textContent=d.dist_rt<999?d.dist_rt+'cm':'--';
@@ -446,8 +496,7 @@ document.getElementById('dr').textContent=d.dist_r<999?d.dist_r+'cm':'--';
 var t=d.threshold||30;
 ['us_f','us_l','us_rt','us_r'].forEach(function(id,i){
 var v=[d.dist_f,d.dist_l,d.dist_rt,d.dist_r][i];
-var el=document.getElementById(id);
-el.className=v<t&&v<999?'sensor alert':'sensor';
+document.getElementById(id).className=v<t&&v<999?'sensor alert':'sensor';
 });
 document.getElementById('hdg').textContent=d.heading.toFixed(1)+'\u00B0';
 document.getElementById('pit').textContent=d.pitch.toFixed(1)+'\u00B0';
@@ -455,6 +504,7 @@ document.getElementById('rol').textContent=d.roll.toFixed(1)+'\u00B0';
 document.getElementById('tlt').textContent=d.tilted?'SI':'No';
 document.getElementById('arrow').style.transform='rotate('+d.heading+'deg)';
 if(d.volume!==undefined){document.getElementById('vol').value=d.volume;document.getElementById('vv').textContent=d.volume;}
+if(d.speed){document.getElementById('spd').value=d.speed;document.getElementById('sv').textContent=d.speed;}
 }).catch(e=>{})}
 setInterval(poll,2000);poll();
 </script></body></html>
@@ -467,26 +517,47 @@ static esp_err_t webui_handler(httpd_req_t* req) {
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
-    char buf[512];
+    char buf[700];
     esp_netif_ip_info_t ip_info = {};
     esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (netif) esp_netif_get_ip_info(netif, &ip_info);
-    // Snapshot robot state under spinlock
+
+    // WiFi RSSI
+    wifi_ap_record_t ap;
+    int rssi = -99;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) rssi = ap.rssi;
+
+    // Chatbot state
+    auto& app = Application::GetInstance();
+    const char* chat_state = "idle";
+    switch (app.GetDeviceState()) {
+        case kDeviceStateListening: chat_state = "listening"; break;
+        case kDeviceStateSpeaking:  chat_state = "speaking"; break;
+        case kDeviceStateConnecting: chat_state = "connecting"; break;
+        case kDeviceStateActivating: chat_state = "activating"; break;
+        case kDeviceStateWifiConfiguring: chat_state = "wifi_config"; break;
+        default: chat_state = "idle"; break;
+    }
+
+    // Snapshot robot state
     RobotState snap;
     portENTER_CRITICAL(&robot_state_mux);
     snap = robot_state;
     portEXIT_CRITICAL(&robot_state_mux);
+
     snprintf(buf, sizeof(buf),
-        "{\"state\":\"%s\",\"ip\":\"" IPSTR "\",\"server\":\"enzobot.xamad.net\","
-        "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu,"
+        "{\"chat\":\"%s\",\"ip\":\"" IPSTR "\",\"rssi\":%d,"
+        "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu,\"uptime\":%lu,"
+        "\"table\":%d,\"delivery\":\"%s\",\"deliveries\":%d,"
         "\"dist_r\":%d,\"dist_l\":%d,\"dist_rt\":%d,\"dist_f\":%d,\"threshold\":%d,"
         "\"heading\":%.1f,\"pitch\":%.1f,\"roll\":%.1f,\"tilted\":%s,"
         "\"volume\":%d}",
-        snap.motors_enabled ? "attivo" : "disabilitato",
-        IP2STR(&ip_info.ip),
+        chat_state, IP2STR(&ip_info.ip), rssi,
         snap.motors_enabled ? "true" : "false",
         CRUISE_SPEED,
         (unsigned long)esp_get_free_heap_size(),
+        (unsigned long)(esp_timer_get_time() / 1000000),
+        snap.current_table, snap.delivery_state, snap.deliveries,
         snap.dist_rear, snap.dist_left, snap.dist_right, snap.dist_front,
         us_threshold,
         snap.heading, snap.pitch, snap.roll,
@@ -520,6 +591,12 @@ static esp_err_t cmd_handler(httpd_req_t* req) {
                 ESP_LOGI(TAG, "Volume: %d%%", v);
             }
         }
+        else if (strcmp(action, "speed") == 0) {
+            int s = atoi(value);
+            if (s >= MIN_SPEED && s <= MAX_SPEED) send_cmd(CMD_SET_SPEED, s);
+        }
+        else if (strcmp(action, "enable") == 0) { send_cmd(CMD_ENABLE); }
+        else if (strcmp(action, "disable") == 0) { send_cmd(CMD_DISABLE); }
         else if (strcmp(action, "threshold") == 0) {
             int t = atoi(value);
             if (t >= 5 && t <= 200) {
@@ -623,8 +700,17 @@ public:
         // Registra comandi vocali robot
         InitializeTools();
 
-        // TODO: boot sound (enzobot.ogg va aggiunto come EMBED_FILES nel CMakeLists)
-        ESP_LOGI(TAG, "EnzoBot ready (boot sound skipped)");
+        // Boot sound — riprodotto dopo connessione al server
+        xTaskCreate([](void* p) {
+            vTaskDelay(pdMS_TO_TICKS(12000));  // Aspetta connessione server
+            extern const char enzobot_opus_start[] asm("_binary_enzobot_opus_start");
+            extern const char enzobot_opus_end[] asm("_binary_enzobot_opus_end");
+            std::string_view sound(enzobot_opus_start, enzobot_opus_end - enzobot_opus_start);
+            Application::GetInstance().PlaySound(sound);
+            ESP_LOGI("EnzoBot", "Boot sound played (%d bytes)", (int)(enzobot_opus_end - enzobot_opus_start));
+            vTaskDelete(nullptr);
+        }, "boot_snd", 4096, nullptr, 2, nullptr);
+        ESP_LOGI(TAG, "EnzoBot ready");
 
         // WebUI + OLED IP — avvia dopo connessione WiFi
         xTaskCreate([](void* p) {

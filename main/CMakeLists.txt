@@ -733,6 +733,11 @@ endif()
 
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 
+# EnzoBot: embed custom boot sound
+if(CONFIG_BOARD_TYPE_ENZOBOT)
+    list(APPEND COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/boards/enzobot/enzobot.opus)
+endif()
+
 # If target chip is ESP32, exclude specific files to avoid build errors
 if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
