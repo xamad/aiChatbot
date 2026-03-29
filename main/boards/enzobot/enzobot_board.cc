@@ -120,7 +120,7 @@ static void set_motors(int left, int right) {
 }
 
 // ============================================================
-//  ULTRASUONI (3x HC-SR04, auto-detect)
+//  ULTRASUONI (4x HC-SR04, auto-detect)
 // ============================================================
 
 struct USSensor { gpio_num_t trig, echo; bool present; int dist; };
@@ -220,13 +220,17 @@ static void k230_send(const char* json) {
 static void k230_send_sensors() __attribute__((unused));
 static void k230_send_sensors() {
     if (!k230_ok) return;
-    char buf[256];
+    RobotState snap;
+    portENTER_CRITICAL(&robot_state_mux);
+    snap = robot_state;
+    portEXIT_CRITICAL(&robot_state_mux);
+    char buf[300];
     snprintf(buf, sizeof(buf),
-        "{\"dR\":%d,\"dL\":%d,\"dRt\":%d,\"spd\":%d,"
+        "{\"dR\":%d,\"dL\":%d,\"dRt\":%d,\"dF\":%d,\"spd\":%d,"
         "\"sL\":%d,\"sR\":%d,\"en\":%d,\"hdg\":%.1f}\n",
-        robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
-        CRUISE_SPEED, robot_state.speed_left, robot_state.speed_right,
-        robot_state.motors_enabled ? 1 : 0, robot_state.heading);
+        snap.dist_rear, snap.dist_left, snap.dist_right, snap.dist_front,
+        CRUISE_SPEED, snap.speed_left, snap.speed_right,
+        snap.motors_enabled ? 1 : 0, snap.heading);
     uart_write_bytes(UART_NUM_1, buf, strlen(buf));
 }
 
@@ -258,10 +262,17 @@ static void motor_task(void* arg) {
 
     int spd = CRUISE_SPEED;
     RobotCmd cmd;
+    uint32_t last_motor_cmd_ms = 0;
+    static const uint32_t MOTOR_TIMEOUT_MS = 5000;  // Auto-stop dopo 5s senza comandi
 
     while (true) {
+        uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
         // Comandi dalla coda
+        bool got_cmd = false;
         while (xQueueReceive(cmd_queue, &cmd, 0) == pdTRUE) {
+            got_cmd = true;
+            last_motor_cmd_ms = now_ms;
             switch (cmd.type) {
                 case CMD_STOP:      set_motors(0, 0); break;
                 case CMD_FORWARD:   set_motors(spd, spd); break;
@@ -306,6 +317,18 @@ static void motor_task(void* arg) {
                     break;
                 default: break;
             }
+        }
+
+        // Auto-stop sicurezza: ferma motori se nessun comando per 5 secondi
+        if (last_motor_cmd_ms > 0 && (now_ms - last_motor_cmd_ms > MOTOR_TIMEOUT_MS)) {
+            portENTER_CRITICAL(&robot_state_mux);
+            bool moving = (robot_state.speed_left != 0 || robot_state.speed_right != 0);
+            portEXIT_CRITICAL(&robot_state_mux);
+            if (moving) {
+                set_motors(0, 0);
+                ESP_LOGW(TAG, "Auto-stop: nessun comando per %lums", (unsigned long)MOTOR_TIMEOUT_MS);
+            }
+            last_motor_cmd_ms = 0;
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));  // yield per watchdog
@@ -431,6 +454,7 @@ document.getElementById('pit').textContent=d.pitch.toFixed(1)+'\u00B0';
 document.getElementById('rol').textContent=d.roll.toFixed(1)+'\u00B0';
 document.getElementById('tlt').textContent=d.tilted?'SI':'No';
 document.getElementById('arrow').style.transform='rotate('+d.heading+'deg)';
+if(d.volume!==undefined){document.getElementById('vol').value=d.volume;document.getElementById('vv').textContent=d.volume;}
 }).catch(e=>{})}
 setInterval(poll,2000);poll();
 </script></body></html>
@@ -588,7 +612,7 @@ public:
 
         // Motor task: avviato con delay per evitare conflitto LEDC/I2S durante boot
         cmd_queue = xQueueCreate(16, sizeof(RobotCmd));
-        xTaskCreatePinnedToCore(motor_task_delayed, "motor", 6144, this, 5, nullptr, 1);
+        xTaskCreatePinnedToCore(motor_task_delayed, "motor", 8192, this, 5, nullptr, 1);
 
         // Boot button = toggle mute
         boot_button_.OnClick([this]() {
@@ -697,15 +721,19 @@ public:
             "Stato robot: distanze sensori, peso vassoio, direzione, inclinazione.",
             PropertyList(),
             [](const PropertyList& props) -> ReturnValue {
+                RobotState snap;
+                portENTER_CRITICAL(&robot_state_mux);
+                snap = robot_state;
+                portEXIT_CRITICAL(&robot_state_mux);
                 char b[300];
                 snprintf(b, sizeof(b),
                     "Distanze: davanti %dcm, dietro %dcm, sinistra %dcm, destra %dcm. "
                     "Peso: %.0fg. Direzione: %.0f gradi. "
                     "Inclinazione: %.1f/%.1f. Consegne: %d. Stato: %s.",
-                    robot_state.dist_front, robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
-                    robot_state.weight_grams, robot_state.heading,
-                    robot_state.pitch, robot_state.roll,
-                    robot_state.deliveries, robot_state.delivery_state);
+                    snap.dist_front, snap.dist_rear, snap.dist_left, snap.dist_right,
+                    snap.weight_grams, snap.heading,
+                    snap.pitch, snap.roll,
+                    snap.deliveries, snap.delivery_state);
                 return std::string(b);
             });
 
