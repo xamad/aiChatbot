@@ -269,18 +269,22 @@ static void motor_task(void* arg) {
         uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
         // Comandi dalla coda
-        bool got_cmd = false;
         while (xQueueReceive(cmd_queue, &cmd, 0) == pdTRUE) {
-            got_cmd = true;
             last_motor_cmd_ms = now_ms;
+            // Check motors_enabled per comandi movimento
+            bool enabled = true;
+            portENTER_CRITICAL(&robot_state_mux);
+            enabled = robot_state.motors_enabled;
+            portEXIT_CRITICAL(&robot_state_mux);
+
             switch (cmd.type) {
                 case CMD_STOP:      set_motors(0, 0); break;
-                case CMD_FORWARD:   set_motors(spd, spd); break;
-                case CMD_BACKWARD:  set_motors(-spd, -spd); break;
-                case CMD_LEFT:      set_motors(spd/3, spd); break;
-                case CMD_RIGHT:     set_motors(spd, spd/3); break;
-                case CMD_ROTATE_L:  set_motors(-spd, spd); break;
-                case CMD_ROTATE_R:  set_motors(spd, -spd); break;
+                case CMD_FORWARD:   if (enabled) set_motors(spd, spd); break;
+                case CMD_BACKWARD:  if (enabled) set_motors(-spd, -spd); break;
+                case CMD_LEFT:      if (enabled) set_motors(spd/3, spd); break;
+                case CMD_RIGHT:     if (enabled) set_motors(spd, spd/3); break;
+                case CMD_ROTATE_L:  if (enabled) set_motors(-spd, spd); break;
+                case CMD_ROTATE_R:  if (enabled) set_motors(spd, -spd); break;
                 case CMD_SET_SPEED: {
                     spd = cmd.value < MIN_SPEED ? MIN_SPEED : (cmd.value > MAX_SPEED ? MAX_SPEED : cmd.value);
                     ESP_LOGI(TAG, "Speed: %d", spd);
@@ -309,7 +313,8 @@ static void motor_task(void* arg) {
                     break;
                 case CMD_BUZZER:
                     if (BUZZER_PIN != GPIO_NUM_NC) {
-                        for (int i = 0; i < cmd.value; i++) {
+                        int beeps = cmd.value > 20 ? 20 : cmd.value;  // Max 20 beep (~20ms)
+                        for (int i = 0; i < beeps; i++) {
                             gpio_set_level(BUZZER_PIN, 1); esp_rom_delay_us(500);
                             gpio_set_level(BUZZER_PIN, 0); esp_rom_delay_us(500);
                         }
@@ -510,13 +515,19 @@ setInterval(poll,2000);poll();
 </script></body></html>
 )rawhtml";
 
+static void set_cors(httpd_req_t* req) {
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+}
+
 static esp_err_t webui_handler(httpd_req_t* req) {
+    set_cors(req);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, WEBUI_HTML, strlen(WEBUI_HTML));
     return ESP_OK;
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
+    set_cors(req);
     char buf[700];
     esp_netif_ip_info_t ip_info = {};
     esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -569,6 +580,7 @@ static esp_err_t status_handler(httpd_req_t* req) {
 }
 
 static esp_err_t cmd_handler(httpd_req_t* req) {
+    set_cors(req);
     char param[64] = {};
     if (httpd_req_get_url_query_str(req, param, sizeof(param)) == ESP_OK) {
         char action[20] = {};
@@ -604,9 +616,11 @@ static esp_err_t cmd_handler(httpd_req_t* req) {
                 ESP_LOGI(TAG, "US threshold: %dcm", t);
             }
         }
-        httpd_resp_sendstr(req, action);
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req, "ok");
         return ESP_OK;
     }
+    httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "no action");
     return ESP_OK;
 }
@@ -700,16 +714,20 @@ public:
         // Registra comandi vocali robot
         InitializeTools();
 
-        // Boot sound — riprodotto dopo connessione al server
+        // Boot sound — aspetta che il device sia in stato idle (server connesso)
         xTaskCreate([](void* p) {
-            vTaskDelay(pdMS_TO_TICKS(12000));  // Aspetta connessione server
+            for (int i = 0; i < 30; i++) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                if (Application::GetInstance().GetDeviceState() == kDeviceStateIdle) break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));  // Breve pausa dopo idle
             extern const char enzobot_opus_start[] asm("_binary_enzobot_opus_start");
             extern const char enzobot_opus_end[] asm("_binary_enzobot_opus_end");
             std::string_view sound(enzobot_opus_start, enzobot_opus_end - enzobot_opus_start);
             Application::GetInstance().PlaySound(sound);
             ESP_LOGI("EnzoBot", "Boot sound played (%d bytes)", (int)(enzobot_opus_end - enzobot_opus_start));
             vTaskDelete(nullptr);
-        }, "boot_snd", 4096, nullptr, 2, nullptr);
+        }, "boot_snd", 6144, nullptr, 2, nullptr);
         ESP_LOGI(TAG, "EnzoBot ready");
 
         // WebUI + OLED IP — avvia dopo connessione WiFi
