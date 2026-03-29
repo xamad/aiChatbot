@@ -1,6 +1,6 @@
 // === EnzoBot — Xiaozhi Custom Board Config ===
 // ESP32-S3-DevKitC-1 N16R8
-// 2x L298N (uno per motore NEMA17) + K230 Yahboom + sensori
+// 1x L298N (2 motori DC) + K230 Yahboom + sensori
 
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
@@ -17,7 +17,7 @@
 #define AUDIO_I2S_MIC_GPIO_WS      GPIO_NUM_14
 #define AUDIO_I2S_MIC_GPIO_SCK     GPIO_NUM_13
 #define AUDIO_I2S_MIC_GPIO_DIN     GPIO_NUM_21
-// Speaker: GPIO 16,17,48 (temporaneo — 16/17 saranno HX711 quando arriva)
+// Speaker MAX98357A (I2S0)
 #define AUDIO_I2S_SPK_GPIO_BCLK    GPIO_NUM_16
 #define AUDIO_I2S_SPK_GPIO_LRCK    GPIO_NUM_17
 #define AUDIO_I2S_SPK_GPIO_DOUT    GPIO_NUM_48
@@ -42,17 +42,19 @@
 #define MOT_R_IN2                   GPIO_NUM_5   // Direzione DX
 #define MOT_R_ENA                   GPIO_NUM_6   // PWM velocità DX
 
-// === SENSORI ULTRASUONI (3x HC-SR04) ===
+// === SENSORI ULTRASUONI (4x HC-SR04, uno per lato) ===
 #define US_REAR_TRIG                GPIO_NUM_7
 #define US_REAR_ECHO                GPIO_NUM_15
 #define US_LEFT_TRIG                GPIO_NUM_19
 #define US_LEFT_ECHO                GPIO_NUM_20
 #define US_RIGHT_TRIG               GPIO_NUM_38
 #define US_RIGHT_ECHO               GPIO_NUM_47
+#define US_FRONT_TRIG               GPIO_NUM_39
+#define US_FRONT_ECHO               GPIO_NUM_40
 
-// === CELLA DI CARICO HX711 ===
-#define HX711_DT_PIN                GPIO_NUM_16
-#define HX711_SCK_PIN               GPIO_NUM_17
+// === CELLA DI CARICO HX711 (non condiviso con speaker) ===
+#define HX711_DT_PIN                GPIO_NUM_10
+#define HX711_SCK_PIN               GPIO_NUM_11
 
 // === UART K230 Yahboom ===
 #define K230_TX_PIN                 GPIO_NUM_18

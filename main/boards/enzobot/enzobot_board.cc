@@ -54,7 +54,7 @@ struct RobotCmd {
 };
 
 struct RobotState {
-    int dist_rear = 999, dist_left = 999, dist_right = 999;
+    int dist_rear = 999, dist_left = 999, dist_right = 999, dist_front = 999;
     int speed_left = 0, speed_right = 0;
     float weight_grams = 0;
     bool motors_enabled = true;
@@ -66,7 +66,8 @@ struct RobotState {
 };
 
 static QueueHandle_t cmd_queue = nullptr;
-static volatile RobotState robot_state = {};
+static RobotState robot_state = {};
+static portMUX_TYPE robot_state_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ============================================================
 //  MOTORI DC via L298N singolo (canale A = SX, canale B = DX)
@@ -112,8 +113,10 @@ static void set_motors(int left, int right) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, abs(right));
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 
-    ((RobotState&)robot_state).speed_left = left;
-    ((RobotState&)robot_state).speed_right = right;
+    portENTER_CRITICAL(&robot_state_mux);
+    robot_state.speed_left = left;
+    robot_state.speed_right = right;
+    portEXIT_CRITICAL(&robot_state_mux);
 }
 
 // ============================================================
@@ -121,10 +124,11 @@ static void set_motors(int left, int right) {
 // ============================================================
 
 struct USSensor { gpio_num_t trig, echo; bool present; int dist; };
-static USSensor us[3] = {
+static USSensor us[4] = {
     {US_REAR_TRIG, US_REAR_ECHO, false, 999},
     {US_LEFT_TRIG, US_LEFT_ECHO, false, 999},
     {US_RIGHT_TRIG, US_RIGHT_ECHO, false, 999},
+    {US_FRONT_TRIG, US_FRONT_ECHO, false, 999},
 };
 
 static int read_us_one(gpio_num_t trig, gpio_num_t echo) {
@@ -139,9 +143,10 @@ static int read_us_one(gpio_num_t trig, gpio_num_t echo) {
     return (int)((esp_timer_get_time() - start) / 58);
 }
 
+static void init_us() __attribute__((unused));
 static void init_us() {
-    const char* names[] = {"REAR", "LEFT", "RIGHT"};
-    for (int i = 0; i < 3; i++) {
+    const char* names[] = {"REAR", "LEFT", "RIGHT", "FRONT"};
+    for (int i = 0; i < 4; i++) {
         gpio_set_direction(us[i].trig, GPIO_MODE_OUTPUT);
         gpio_set_direction(us[i].echo, GPIO_MODE_INPUT);
         for (int t = 0; t < 3 && !us[i].present; t++) {
@@ -152,19 +157,23 @@ static void init_us() {
     }
 }
 
+static void read_us_round() __attribute__((unused));
 static void read_us_round() {
     static int cur = 0;
-    for (int a = 0; a < 3; a++) {
+    for (int a = 0; a < 4; a++) {
         if (us[cur].present) {
             us[cur].dist = read_us_one(us[cur].trig, us[cur].echo);
             break;
         }
-        cur = (cur + 1) % 3;
+        cur = (cur + 1) % 4;
     }
-    cur = (cur + 1) % 3;
-    ((RobotState&)robot_state).dist_rear  = us[0].present ? us[0].dist : 999;
-    ((RobotState&)robot_state).dist_left  = us[1].present ? us[1].dist : 999;
-    ((RobotState&)robot_state).dist_right = us[2].present ? us[2].dist : 999;
+    cur = (cur + 1) % 4;
+    portENTER_CRITICAL(&robot_state_mux);
+    robot_state.dist_rear  = us[0].present ? us[0].dist : 999;
+    robot_state.dist_left  = us[1].present ? us[1].dist : 999;
+    robot_state.dist_right = us[2].present ? us[2].dist : 999;
+    robot_state.dist_front = us[3].present ? us[3].dist : 999;
+    portEXIT_CRITICAL(&robot_state_mux);
 }
 
 // ============================================================
@@ -180,6 +189,7 @@ static void read_us_round() {
 
 static bool k230_ok = false;
 
+static void init_k230() __attribute__((unused));
 static void init_k230() {
     uart_config_t cfg = {};
     cfg.baud_rate = K230_BAUD;
@@ -207,6 +217,7 @@ static void k230_send(const char* json) {
     uart_write_bytes(UART_NUM_1, "\n", 1);
 }
 
+static void k230_send_sensors() __attribute__((unused));
 static void k230_send_sensors() {
     if (!k230_ok) return;
     char buf[256];
@@ -267,13 +278,24 @@ static void motor_task(void* arg) {
                 case CMD_GOTO_TABLE: {
                     char b[64]; snprintf(b, 64, "{\"cmd\":\"goto_table\",\"table\":%d}", cmd.value);
                     k230_send(b);
-                    ((RobotState&)robot_state).current_table = cmd.value;
-                    strncpy(((RobotState&)robot_state).delivery_state, "delivering", 15);
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.current_table = cmd.value;
+                    strncpy(robot_state.delivery_state, "delivering", 15);
+                    portEXIT_CRITICAL(&robot_state_mux);
                     break;
                 }
                 case CMD_GOTO_KITCHEN: k230_send("{\"cmd\":\"goto_kitchen\"}"); break;
-                case CMD_ENABLE:  ((RobotState&)robot_state).motors_enabled = true; break;
-                case CMD_DISABLE: set_motors(0,0); ((RobotState&)robot_state).motors_enabled = false; break;
+                case CMD_ENABLE:
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.motors_enabled = true;
+                    portEXIT_CRITICAL(&robot_state_mux);
+                    break;
+                case CMD_DISABLE:
+                    set_motors(0,0);
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.motors_enabled = false;
+                    portEXIT_CRITICAL(&robot_state_mux);
+                    break;
                 case CMD_BUZZER:
                     if (BUZZER_PIN != GPIO_NUM_NC) {
                         for (int i = 0; i < cmd.value; i++) {
@@ -310,7 +332,7 @@ static void send_cmd(RobotCmdType type, int val = 0) {
 
 static httpd_handle_t webserver = nullptr;
 
-static int current_volume = 80;
+static int current_volume = 100;  // Sync with AudioCodec default
 static int us_threshold = US_WARNING_DIST;
 
 static const char* WEBUI_HTML = R"rawhtml(
@@ -350,8 +372,8 @@ input[type=range]{width:100%;accent-color:#55aaff}
 <div class="row"><span class="lbl">Motori</span><span class="val" id="mot">--</span></div>
 </div>
 
-<h2>&#127925; Volume: <span id="vv">80</span>%</h2>
-<input type="range" min="0" max="100" value="80" id="vol" oninput="document.getElementById('vv').textContent=this.value" onchange="fetch('/cmd?a=volume&v='+this.value)">
+<h2>&#127925; Volume: <span id="vv">100</span>%</h2>
+<input type="range" min="0" max="100" value="100" id="vol" oninput="document.getElementById('vv').textContent=this.value" onchange="fetch('/cmd?a=volume&v='+this.value)">
 
 <h2>&#128663; Controllo</h2>
 <div class="grid">
@@ -367,9 +389,10 @@ input[type=range]{width:100%;accent-color:#55aaff}
 <h2>&#128225; Sensori Ultrasuoni</h2>
 <div class="card">
 <div class="sensors">
-<div class="sensor" id="us_r"><div class="dist" id="dr">--</div><div class="name">Dietro</div></div>
+<div class="sensor" id="us_f"><div class="dist" id="df">--</div><div class="name">Davanti</div></div>
 <div class="sensor" id="us_l"><div class="dist" id="dl">--</div><div class="name">Sinistra</div></div>
 <div class="sensor" id="us_rt"><div class="dist" id="drt">--</div><div class="name">Destra</div></div>
+<div class="sensor" id="us_r"><div class="dist" id="dr">--</div><div class="name">Dietro</div></div>
 </div>
 <div style="margin-top:8px">
 <span class="lbl">Soglia allarme: <span id="tv">30</span>cm</span>
@@ -393,12 +416,13 @@ document.getElementById('st').textContent=d.state;
 document.getElementById('ip').textContent=d.ip;
 document.getElementById('srv').textContent=d.server;
 document.getElementById('mot').textContent=d.motors_en?'ON':'OFF';
-document.getElementById('dr').textContent=d.dist_r<999?d.dist_r+'cm':'--';
+document.getElementById('df').textContent=d.dist_f<999?d.dist_f+'cm':'--';
 document.getElementById('dl').textContent=d.dist_l<999?d.dist_l+'cm':'--';
 document.getElementById('drt').textContent=d.dist_rt<999?d.dist_rt+'cm':'--';
+document.getElementById('dr').textContent=d.dist_r<999?d.dist_r+'cm':'--';
 var t=d.threshold||30;
-['us_r','us_l','us_rt'].forEach(function(id,i){
-var v=[d.dist_r,d.dist_l,d.dist_rt][i];
+['us_f','us_l','us_rt','us_r'].forEach(function(id,i){
+var v=[d.dist_f,d.dist_l,d.dist_rt,d.dist_r][i];
 var el=document.getElementById(id);
 el.className=v<t&&v<999?'sensor alert':'sensor';
 });
@@ -408,7 +432,7 @@ document.getElementById('rol').textContent=d.roll.toFixed(1)+'\u00B0';
 document.getElementById('tlt').textContent=d.tilted?'SI':'No';
 document.getElementById('arrow').style.transform='rotate('+d.heading+'deg)';
 }).catch(e=>{})}
-setInterval(poll,1000);poll();
+setInterval(poll,2000);poll();
 </script></body></html>
 )rawhtml";
 
@@ -423,21 +447,26 @@ static esp_err_t status_handler(httpd_req_t* req) {
     esp_netif_ip_info_t ip_info = {};
     esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (netif) esp_netif_get_ip_info(netif, &ip_info);
+    // Snapshot robot state under spinlock
+    RobotState snap;
+    portENTER_CRITICAL(&robot_state_mux);
+    snap = robot_state;
+    portEXIT_CRITICAL(&robot_state_mux);
     snprintf(buf, sizeof(buf),
         "{\"state\":\"%s\",\"ip\":\"" IPSTR "\",\"server\":\"enzobot.xamad.net\","
         "\"motors_en\":%s,\"speed\":%d,\"heap\":%lu,"
-        "\"dist_r\":%d,\"dist_l\":%d,\"dist_rt\":%d,\"threshold\":%d,"
+        "\"dist_r\":%d,\"dist_l\":%d,\"dist_rt\":%d,\"dist_f\":%d,\"threshold\":%d,"
         "\"heading\":%.1f,\"pitch\":%.1f,\"roll\":%.1f,\"tilted\":%s,"
         "\"volume\":%d}",
-        robot_state.motors_enabled ? "attivo" : "disabilitato",
+        snap.motors_enabled ? "attivo" : "disabilitato",
         IP2STR(&ip_info.ip),
-        robot_state.motors_enabled ? "true" : "false",
+        snap.motors_enabled ? "true" : "false",
         CRUISE_SPEED,
         (unsigned long)esp_get_free_heap_size(),
-        robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
+        snap.dist_rear, snap.dist_left, snap.dist_right, snap.dist_front,
         us_threshold,
-        robot_state.heading, robot_state.pitch, robot_state.roll,
-        robot_state.tilted ? "true" : "false",
+        snap.heading, snap.pitch, snap.roll,
+        snap.tilted ? "true" : "false",
         current_volume);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, strlen(buf));
@@ -598,8 +627,7 @@ public:
     }
 
     AudioCodec* GetAudioCodec() override {
-        // MAX98357A speaker (16-bit, mono left) + INMP441 mic (32-bit)
-        // INMP441: L/R=GND→LEFT, L/R=VCC→RIGHT. Try BOTH via slot mask.
+        // MAX98357A speaker (16-bit, mono left) + INMP441 mic (32-bit, L/R=GND→LEFT)
         static NoAudioCodecSimplex codec(
             AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
@@ -671,10 +699,10 @@ public:
             [](const PropertyList& props) -> ReturnValue {
                 char b[300];
                 snprintf(b, sizeof(b),
-                    "Distanze: dietro %dcm, sinistra %dcm, destra %dcm. "
+                    "Distanze: davanti %dcm, dietro %dcm, sinistra %dcm, destra %dcm. "
                     "Peso: %.0fg. Direzione: %.0f gradi. "
                     "Inclinazione: %.1f/%.1f. Consegne: %d. Stato: %s.",
-                    robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
+                    robot_state.dist_front, robot_state.dist_rear, robot_state.dist_left, robot_state.dist_right,
                     robot_state.weight_grams, robot_state.heading,
                     robot_state.pitch, robot_state.roll,
                     robot_state.deliveries, robot_state.delivery_state);
