@@ -430,6 +430,27 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
     }
 
     samples = bytes_read / sizeof(int32_t);
+
+    // MIC DIAGNOSTIC: dump raw I2S values every ~3 seconds
+    static int diag_counter = 0;
+    if (++diag_counter >= 100) {
+        diag_counter = 0;
+        int32_t raw_min = INT32_MAX, raw_max = INT32_MIN;
+        int non_zero = 0;
+        for (int i = 0; i < samples; i++) {
+            if (bit32_buffer[i] != 0) non_zero++;
+            if (bit32_buffer[i] < raw_min) raw_min = bit32_buffer[i];
+            if (bit32_buffer[i] > raw_max) raw_max = bit32_buffer[i];
+        }
+        ESP_LOGW(TAG, "MIC DIAG: samples=%d, non_zero=%d/%d, raw_min=0x%08lx, raw_max=0x%08lx, first4=[0x%08lx,0x%08lx,0x%08lx,0x%08lx]",
+            samples, non_zero, samples,
+            (long)raw_min, (long)raw_max,
+            (long)(samples > 0 ? bit32_buffer[0] : 0),
+            (long)(samples > 1 ? bit32_buffer[1] : 0),
+            (long)(samples > 2 ? bit32_buffer[2] : 0),
+            (long)(samples > 3 ? bit32_buffer[3] : 0));
+    }
+
     for (int i = 0; i < samples; i++) {
         int32_t value = bit32_buffer[i] >> 12;
         dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;

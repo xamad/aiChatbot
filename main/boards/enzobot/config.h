@@ -10,7 +10,7 @@
 // === AUDIO — INMP441 (mic) + MAX98357A (speaker) ===
 // Simplex: mic e speaker su I2S bus separati
 #define AUDIO_INPUT_SAMPLE_RATE     16000
-#define AUDIO_OUTPUT_SAMPLE_RATE    24000
+#define AUDIO_OUTPUT_SAMPLE_RATE    16000
 
 #define AUDIO_I2S_METHOD_SIMPLEX
 

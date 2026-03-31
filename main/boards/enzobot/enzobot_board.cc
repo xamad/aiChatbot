@@ -1,10 +1,14 @@
 /**
- * enzobot_board.cc — EnzoBot Custom Board per Xiaozhi ESP32
+ * enzobot_board.cc — EnzoBot ZOD — Robot Cameriere AI con Visione
  *
  * Core 0: Xiaozhi (audio, WiFi, LLM, wake word, OLED)
- * Core 1: Task motori (L298N, sensori, UART K230, MPU6050)
+ * Core 1: Task motori (L298N, sensori, K230 vision nav, MPU6050)
  *
- * Basato su bread-compact-wifi come riferimento per OLED + I2S simplex.
+ * Architettura ZOD (3 agenti):
+ *   Server VPS (Claude LLM) → ESP32 (interazione + sicurezza) → K230 (navigazione YOLO)
+ *
+ * K230 Yahboom: navigazione via computer vision (YOLO), NO ArUco/line follow
+ * Protocollo: JSON bidirezionale su UART1 @ 115200 baud
  */
 
 #include "wifi_board.h"
@@ -34,6 +38,8 @@
 #include <cstring>
 #include <cmath>
 #include <string>
+#include "cJSON.h"
+#include "k230_protocol.h"
 
 #define TAG "EnzoBot"
 
@@ -46,6 +52,11 @@ enum RobotCmdType {
     CMD_LEFT, CMD_RIGHT, CMD_ROTATE_L, CMD_ROTATE_R,
     CMD_SET_SPEED, CMD_GOTO_TABLE, CMD_GOTO_KITCHEN,
     CMD_ENABLE, CMD_DISABLE, CMD_BUZZER,
+    CMD_DANCE, CMD_BOW,
+    // ZOD — K230 Vision Navigation
+    CMD_NAV_START,   // value = table number (0 = kitchen)
+    CMD_NAV_ABORT,
+    CMD_SCAN,
 };
 
 struct RobotCmd {
@@ -56,6 +67,7 @@ struct RobotCmd {
 struct RobotState {
     int dist_rear = 999, dist_left = 999, dist_right = 999, dist_front = 999;
     int speed_left = 0, speed_right = 0;
+    int speed_setting = CRUISE_SPEED;
     float weight_grams = 0;
     bool motors_enabled = true;
     char delivery_state[16] = "idle";
@@ -63,11 +75,21 @@ struct RobotState {
     int deliveries = 0;
     float heading = 0, pitch = 0, roll = 0;
     bool tilted = false, mpu_present = false;
+    // ZOD — K230 navigation
+    NavState nav_state = NAV_IDLE;
+    bool k230_connected = false;
+    int nav_progress = 0;
+    int vision_objects = 0;
 };
 
 static QueueHandle_t cmd_queue = nullptr;
 static RobotState robot_state = {};
 static portMUX_TYPE robot_state_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// ZOD — K230 Vision
+static K230Uart k230;
+static K230State k230_state = {};
+static portMUX_TYPE k230_state_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ============================================================
 //  MOTORI DC via L298N singolo (canale A = SX, canale B = DX)
@@ -102,7 +124,12 @@ static void init_motors() {
     ledc_channel_config(&ch);
 }
 
-static void set_motors(int left, int right) {
+// Target and current speeds for smooth ramping
+static int target_left = 0, target_right = 0;
+static int current_left = 0, current_right = 0;
+static const int RAMP_STEP = 8;  // PWM units per 50ms tick — smooth ramp ~0.6s to full speed
+
+static void apply_motors(int left, int right) {
     gpio_set_level(MOT_L_IN1, left > 0 ? 1 : 0);
     gpio_set_level(MOT_L_IN2, left < 0 ? 1 : 0);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, abs(left));
@@ -117,6 +144,27 @@ static void set_motors(int left, int right) {
     robot_state.speed_left = left;
     robot_state.speed_right = right;
     portEXIT_CRITICAL(&robot_state_mux);
+}
+
+static void set_motors(int left, int right) {
+    target_left = left;
+    target_right = right;
+}
+
+// Ramp current toward target by RAMP_STEP per tick
+static void ramp_motors() {
+    bool changed = false;
+    if (current_left < target_left) { current_left = std::min(current_left + RAMP_STEP, target_left); changed = true; }
+    else if (current_left > target_left) { current_left = std::max(current_left - RAMP_STEP, target_left); changed = true; }
+    if (current_right < target_right) { current_right = std::min(current_right + RAMP_STEP, target_right); changed = true; }
+    else if (current_right > target_right) { current_right = std::max(current_right - RAMP_STEP, target_right); changed = true; }
+    if (changed) apply_motors(current_left, current_right);
+}
+
+// Immediate stop (bypass ramp for emergency)
+static void hard_stop() {
+    target_left = target_right = current_left = current_right = 0;
+    apply_motors(0, 0);
 }
 
 // ============================================================
@@ -184,54 +232,16 @@ static void read_us_round() {
 // Usera' il bus I2C condiviso con OLED (GPIO 8/9, addr 0x68).
 
 // ============================================================
-//  UART K230
+//  K230 Yahboom — Inizializzazione (via k230_protocol.h)
 // ============================================================
 
-static bool k230_ok = false;
-
-static void init_k230() __attribute__((unused));
-static void init_k230() {
-    uart_config_t cfg = {};
-    cfg.baud_rate = K230_BAUD;
-    cfg.data_bits = UART_DATA_8_BITS;
-    cfg.parity = UART_PARITY_DISABLE;
-    cfg.stop_bits = UART_STOP_BITS_1;
-    cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
-    uart_param_config(UART_NUM_1, &cfg);
-    uart_set_pin(UART_NUM_1, (int)K230_TX_PIN, (int)K230_RX_PIN, -1, -1);
-    uart_driver_install(UART_NUM_1, 512, 512, 0, nullptr, 0);
-
-    const char* ping = "{\"cmd\":\"ping\"}\n";
-    uart_write_bytes(UART_NUM_1, ping, strlen(ping));
-    vTaskDelay(pdMS_TO_TICKS(500));
-    size_t len = 0;
-    uart_get_buffered_data_len(UART_NUM_1, &len);
-    k230_ok = (len > 0);
-    uart_flush(UART_NUM_1);
-    ESP_LOGI(TAG, "K230: %s", k230_ok ? "OK" : "---");
-}
-
-static void k230_send(const char* json) {
-    if (!k230_ok) return;
-    uart_write_bytes(UART_NUM_1, json, strlen(json));
-    uart_write_bytes(UART_NUM_1, "\n", 1);
-}
-
-static void k230_send_sensors() __attribute__((unused));
-static void k230_send_sensors() {
-    if (!k230_ok) return;
-    RobotState snap;
-    portENTER_CRITICAL(&robot_state_mux);
-    snap = robot_state;
-    portEXIT_CRITICAL(&robot_state_mux);
-    char buf[300];
-    snprintf(buf, sizeof(buf),
-        "{\"dR\":%d,\"dL\":%d,\"dRt\":%d,\"dF\":%d,\"spd\":%d,"
-        "\"sL\":%d,\"sR\":%d,\"en\":%d,\"hdg\":%.1f}\n",
-        snap.dist_rear, snap.dist_left, snap.dist_right, snap.dist_front,
-        CRUISE_SPEED, snap.speed_left, snap.speed_right,
-        snap.motors_enabled ? 1 : 0, snap.heading);
-    uart_write_bytes(UART_NUM_1, buf, strlen(buf));
+static void init_k230_vision() {
+    k230.Init(K230_TX_PIN, K230_RX_PIN, K230_BAUD);
+    if (k230.ok) {
+        portENTER_CRITICAL(&k230_state_mux);
+        k230_state.connected = true;
+        portEXIT_CRITICAL(&k230_state_mux);
+    }
 }
 
 // ============================================================
@@ -241,24 +251,21 @@ static void k230_send_sensors() {
 static void motor_task(void* arg) {
     ESP_LOGI(TAG, "Motor task su Core %d", xPortGetCoreID());
 
-    // Init motori (non blocca, solo GPIO config)
+    // Init motori
     init_motors();
     ESP_LOGI(TAG, "Motori OK");
 
-    // Buzzer e LED (skip se GPIO_NUM_NC — PSRAM octal usa GPIO33-37)
+    // Buzzer e LED
     if (BUZZER_PIN != GPIO_NUM_NC) gpio_set_direction(BUZZER_PIN, GPIO_MODE_OUTPUT);
     if (LED_STATUS_PIN != GPIO_NUM_NC) gpio_set_direction(LED_STATUS_PIN, GPIO_MODE_OUTPUT);
     if (LED_STATUS_PIN != GPIO_NUM_NC) gpio_set_level(LED_STATUS_PIN, 1);
     ESP_LOGI(TAG, "GPIO OK");
 
-    // Ultrasuoni: skip auto-detect per ora, attiva lazy nel loop
-    // (evita blocco da pulseIn su sensori non connessi)
-    ESP_LOGI(TAG, "Sensori: auto-detect disabilitato (nessuno connesso)");
+    // K230 Vision — init UART bidirezionale
+    init_k230_vision();
+    ESP_LOGI(TAG, "K230: %s", k230.ok ? "ONLINE (ZOD mode)" : "offline (manual mode)");
 
-    // K230: skip init, attiva quando collegata
-    ESP_LOGI(TAG, "K230: skip (non collegata)");
-
-    ESP_LOGI(TAG, "Motor task pronto!");
+    ESP_LOGI(TAG, "Motor task pronto! [ZOD]");
 
     int spd = CRUISE_SPEED;
     RobotCmd cmd;
@@ -278,7 +285,7 @@ static void motor_task(void* arg) {
             portEXIT_CRITICAL(&robot_state_mux);
 
             switch (cmd.type) {
-                case CMD_STOP:      set_motors(0, 0); break;
+                case CMD_STOP:      hard_stop(); break;
                 case CMD_FORWARD:   if (enabled) set_motors(spd, spd); break;
                 case CMD_BACKWARD:  if (enabled) set_motors(-spd, -spd); break;
                 case CMD_LEFT:      if (enabled) set_motors(spd/3, spd); break;
@@ -287,53 +294,238 @@ static void motor_task(void* arg) {
                 case CMD_ROTATE_R:  if (enabled) set_motors(spd, -spd); break;
                 case CMD_SET_SPEED: {
                     spd = cmd.value < MIN_SPEED ? MIN_SPEED : (cmd.value > MAX_SPEED ? MAX_SPEED : cmd.value);
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.speed_setting = spd;
+                    portEXIT_CRITICAL(&robot_state_mux);
                     ESP_LOGI(TAG, "Speed: %d", spd);
                     break;
                 }
                 case CMD_GOTO_TABLE: {
-                    char b[64]; snprintf(b, 64, "{\"cmd\":\"goto_table\",\"table\":%d}", cmd.value);
-                    k230_send(b);
+                    // Legacy: direct command (works without K230)
+                    char b[64]; snprintf(b, 64, "table_%d", cmd.value);
+                    k230.SendNavigate(b);
                     portENTER_CRITICAL(&robot_state_mux);
                     robot_state.current_table = cmd.value;
                     strncpy(robot_state.delivery_state, "delivering", 15);
                     portEXIT_CRITICAL(&robot_state_mux);
                     break;
                 }
-                case CMD_GOTO_KITCHEN: k230_send("{\"cmd\":\"goto_kitchen\"}"); break;
+                case CMD_GOTO_KITCHEN: k230.SendNavigate("kitchen"); break;
+                case CMD_NAV_START: {
+                    // ZOD: smart navigation via K230 vision
+                    char dest[32];
+                    if (cmd.value == 0) snprintf(dest, sizeof(dest), "kitchen");
+                    else snprintf(dest, sizeof(dest), "table_%d", cmd.value);
+                    k230.SendNavigate(dest);
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.nav_state = NAV_NAVIGATING;
+                    robot_state.current_table = cmd.value;
+                    strncpy(robot_state.delivery_state, "navigating", 15);
+                    portEXIT_CRITICAL(&robot_state_mux);
+                    ESP_LOGI(TAG, "NAV START → %s", dest);
+                    break;
+                }
+                case CMD_NAV_ABORT: {
+                    k230.Send("{\"cmd\":\"abort\"}");
+                    hard_stop();
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.nav_state = NAV_IDLE;
+                    strncpy(robot_state.delivery_state, "idle", 15);
+                    portEXIT_CRITICAL(&robot_state_mux);
+                    ESP_LOGW(TAG, "NAV ABORT");
+                    break;
+                }
+                case CMD_SCAN: {
+                    k230.Send("{\"cmd\":\"scan\"}");
+                    portENTER_CRITICAL(&k230_state_mux);
+                    k230_state.scan_ready = false;
+                    portEXIT_CRITICAL(&k230_state_mux);
+                    ESP_LOGI(TAG, "SCAN requested");
+                    break;
+                }
                 case CMD_ENABLE:
                     portENTER_CRITICAL(&robot_state_mux);
                     robot_state.motors_enabled = true;
                     portEXIT_CRITICAL(&robot_state_mux);
                     break;
                 case CMD_DISABLE:
-                    set_motors(0,0);
+                    hard_stop();
                     portENTER_CRITICAL(&robot_state_mux);
                     robot_state.motors_enabled = false;
                     portEXIT_CRITICAL(&robot_state_mux);
                     break;
                 case CMD_BUZZER:
                     if (BUZZER_PIN != GPIO_NUM_NC) {
-                        int beeps = cmd.value > 20 ? 20 : cmd.value;  // Max 20 beep (~20ms)
+                        int beeps = cmd.value > 20 ? 20 : cmd.value;
                         for (int i = 0; i < beeps; i++) {
                             gpio_set_level(BUZZER_PIN, 1); esp_rom_delay_us(500);
                             gpio_set_level(BUZZER_PIN, 0); esp_rom_delay_us(500);
                         }
                     }
                     break;
+                case CMD_DANCE:
+                    if (enabled) {
+                        int dance_spd = spd * 2 / 3;
+                        for (int i = 0; i < 3; i++) {
+                            apply_motors(-dance_spd, dance_spd); vTaskDelay(pdMS_TO_TICKS(400));
+                            apply_motors(dance_spd, -dance_spd); vTaskDelay(pdMS_TO_TICKS(400));
+                        }
+                        apply_motors(dance_spd, dance_spd); vTaskDelay(pdMS_TO_TICKS(300));
+                        apply_motors(-dance_spd, -dance_spd); vTaskDelay(pdMS_TO_TICKS(300));
+                        hard_stop();
+                        ESP_LOGI(TAG, "Danza completata!");
+                    }
+                    break;
+                case CMD_BOW:
+                    if (enabled) {
+                        int bow_spd = SLOW_SPEED;
+                        apply_motors(bow_spd, bow_spd); vTaskDelay(pdMS_TO_TICKS(300));
+                        hard_stop(); vTaskDelay(pdMS_TO_TICKS(800));
+                        apply_motors(-bow_spd, -bow_spd); vTaskDelay(pdMS_TO_TICKS(300));
+                        hard_stop();
+                        ESP_LOGI(TAG, "Inchino completato!");
+                    }
+                    break;
                 default: break;
             }
         }
 
-        // Auto-stop sicurezza: ferma motori se nessun comando per 5 secondi
-        if (last_motor_cmd_ms > 0 && (now_ms - last_motor_cmd_ms > MOTOR_TIMEOUT_MS)) {
+        // Smooth acceleration ramp (every 50ms tick)
+        ramp_motors();
+
+        // === K230 UART bidirezionale (ZOD) ===
+        if (k230.ok) {
+            k230.Receive(k230_state, k230_state_mux);
+
+            // Process motor commands from K230 (visual navigation)
+            portENTER_CRITICAL(&k230_state_mux);
+            bool has_motor_cmd = k230_state.motor_cmd_pending;
+            int ml = k230_state.motor_left, mr = k230_state.motor_right;
+            int mdur = k230_state.motor_dur_ms;
+            NavState k_nav = k230_state.nav_state;
+            k230_state.motor_cmd_pending = false;
+            portEXIT_CRITICAL(&k230_state_mux);
+
+            // Execute K230 motor commands (only during navigation, with safety check)
+            bool is_navigating = false;
             portENTER_CRITICAL(&robot_state_mux);
-            bool moving = (robot_state.speed_left != 0 || robot_state.speed_right != 0);
+            is_navigating = (robot_state.nav_state == NAV_NAVIGATING || robot_state.nav_state == NAV_RETURNING);
+            bool enabled = robot_state.motors_enabled;
             portEXIT_CRITICAL(&robot_state_mux);
-            if (moving) {
-                set_motors(0, 0);
-                ESP_LOGW(TAG, "Auto-stop: nessun comando per %lums", (unsigned long)MOTOR_TIMEOUT_MS);
+
+            // Motor stop timer (non-blocking replacement for vTaskDelay)
+            static uint32_t motor_stop_at_ms = 0;
+            if (motor_stop_at_ms > 0 && now_ms >= motor_stop_at_ms) {
+                apply_motors(0, 0);
+                motor_stop_at_ms = 0;
             }
-            last_motor_cmd_ms = 0;
+
+            if (has_motor_cmd && is_navigating && enabled) {
+                // Safety: check ultrasonics before executing K230 motor command
+                bool us_clear = (robot_state.dist_front > US_EMERGENCY_DIST || ml <= 0);
+                if (us_clear) {
+                    apply_motors(ml, mr);
+                    last_motor_cmd_ms = now_ms;
+                    // Non-blocking duration: schedule stop instead of vTaskDelay
+                    if (mdur > 0) {
+                        motor_stop_at_ms = now_ms + mdur;
+                    }
+                } else {
+                    hard_stop();
+                    motor_stop_at_ms = 0;
+                    k230.Send("{\"cmd\":\"obstacle_detected\"}");
+                    ESP_LOGW(TAG, "US safety override — K230 motor cmd blocked");
+                }
+            }
+
+            // Navigation state sync from K230 (one-shot transition detection)
+            NavState prev_nav;
+            portENTER_CRITICAL(&robot_state_mux);
+            prev_nav = robot_state.nav_state;
+            portEXIT_CRITICAL(&robot_state_mux);
+
+            if (k_nav == NAV_ARRIVED && prev_nav != NAV_ARRIVED) {
+                hard_stop();
+                motor_stop_at_ms = 0;
+                portENTER_CRITICAL(&robot_state_mux);
+                robot_state.nav_state = NAV_ARRIVED;
+                strncpy(robot_state.delivery_state, "arrived", 15);
+                robot_state.deliveries++;
+                portEXIT_CRITICAL(&robot_state_mux);
+                ESP_LOGI(TAG, "NAV: ARRIVED!");
+            } else if (k_nav == NAV_ERROR && prev_nav != NAV_ERROR) {
+                hard_stop();
+                motor_stop_at_ms = 0;
+                portENTER_CRITICAL(&robot_state_mux);
+                robot_state.nav_state = NAV_ERROR;
+                strncpy(robot_state.delivery_state, "error", 15);
+                portEXIT_CRITICAL(&robot_state_mux);
+                ESP_LOGE(TAG, "NAV: ERROR from K230");
+            } else if (k_nav == NAV_NAVIGATING && prev_nav != NAV_NAVIGATING) {
+                portENTER_CRITICAL(&robot_state_mux);
+                robot_state.nav_state = NAV_NAVIGATING;
+                strncpy(robot_state.delivery_state, "navigating", 15);
+                portEXIT_CRITICAL(&robot_state_mux);
+            }
+
+            // K230 connection health check
+            portENTER_CRITICAL(&k230_state_mux);
+            uint32_t last_hb = k230_state.last_msg_ms;
+            portEXIT_CRITICAL(&k230_state_mux);
+            if (last_hb > 0 && (now_ms - last_hb > 5000)) {
+                portENTER_CRITICAL(&k230_state_mux);
+                k230_state.connected = false;
+                portEXIT_CRITICAL(&k230_state_mux);
+                if (is_navigating) {
+                    hard_stop();
+                    portENTER_CRITICAL(&robot_state_mux);
+                    robot_state.nav_state = NAV_ERROR;
+                    strncpy(robot_state.delivery_state, "k230_lost", 15);
+                    portEXIT_CRITICAL(&robot_state_mux);
+                    ESP_LOGE(TAG, "K230 timeout! Emergency stop");
+                }
+            }
+
+            // Send sensor data to K230 every 200ms
+            static uint32_t last_sensor_send = 0;
+            if (now_ms - last_sensor_send > 200) {
+                RobotState snap;
+                portENTER_CRITICAL(&robot_state_mux);
+                snap = robot_state;
+                portEXIT_CRITICAL(&robot_state_mux);
+                k230.SendSensors(snap.dist_front, snap.dist_rear, snap.dist_left, snap.dist_right);
+                last_sensor_send = now_ms;
+            }
+
+            // Sync K230 state to robot_state for WebUI/MCP
+            bool kc; int kp, ko;
+            portENTER_CRITICAL(&k230_state_mux);
+            kc = k230_state.connected;
+            kp = k230_state.nav_progress;
+            ko = k230_state.num_objects;
+            portEXIT_CRITICAL(&k230_state_mux);
+            portENTER_CRITICAL(&robot_state_mux);
+            robot_state.k230_connected = kc;
+            robot_state.nav_progress = kp;
+            robot_state.vision_objects = ko;
+            portEXIT_CRITICAL(&robot_state_mux);
+        }
+
+        // Auto-stop sicurezza: ferma motori se nessun comando per 5 secondi
+        // (disabilitato durante navigazione K230 attiva)
+        NavState cur_nav;
+        portENTER_CRITICAL(&robot_state_mux);
+        cur_nav = robot_state.nav_state;
+        portEXIT_CRITICAL(&robot_state_mux);
+
+        if (cur_nav == NAV_IDLE || cur_nav == NAV_ARRIVED || cur_nav == NAV_ERROR) {
+            if (last_motor_cmd_ms > 0 && (now_ms - last_motor_cmd_ms > MOTOR_TIMEOUT_MS)) {
+                if (target_left != 0 || target_right != 0) {
+                    set_motors(0, 0);
+                    ESP_LOGW(TAG, "Auto-stop: nessun comando per %lums", (unsigned long)MOTOR_TIMEOUT_MS);
+                }
+                last_motor_cmd_ms = 0;
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));  // yield per watchdog
@@ -822,26 +1014,132 @@ public:
             });
 
         mcp.AddTool("self.robot.status",
-            "Stato robot: distanze sensori, peso vassoio, direzione, inclinazione.",
+            "Stato robot: distanze sensori, peso vassoio, direzione, inclinazione, velocita', motori attivi.",
             PropertyList(),
             [](const PropertyList& props) -> ReturnValue {
                 RobotState snap;
                 portENTER_CRITICAL(&robot_state_mux);
                 snap = robot_state;
                 portEXIT_CRITICAL(&robot_state_mux);
-                char b[300];
+                char b[400];
                 snprintf(b, sizeof(b),
                     "Distanze: davanti %dcm, dietro %dcm, sinistra %dcm, destra %dcm. "
-                    "Peso: %.0fg. Direzione: %.0f gradi. "
-                    "Inclinazione: %.1f/%.1f. Consegne: %d. Stato: %s.",
+                    "Peso vassoio: %.0fg. Direzione: %.0f gradi. "
+                    "Inclinazione: %.1f/%.1f. Motori: %s. Velocita': %d. "
+                    "Consegne completate: %d. Stato consegna: %s. Tavolo corrente: %d.",
                     snap.dist_front, snap.dist_rear, snap.dist_left, snap.dist_right,
                     snap.weight_grams, snap.heading,
                     snap.pitch, snap.roll,
-                    snap.deliveries, snap.delivery_state);
+                    snap.motors_enabled ? "attivi" : "disabilitati",
+                    snap.speed_setting,
+                    snap.deliveries, snap.delivery_state, snap.current_table);
                 return std::string(b);
             });
 
-        ESP_LOGI(TAG, "6 MCP tools registrati");
+        mcp.AddTool("self.robot.dance",
+            "Fai una danza del cameriere! Giri su te stesso con stile per intrattenere i clienti.",
+            PropertyList(),
+            [](const PropertyList& props) -> ReturnValue {
+                send_cmd(CMD_DANCE);
+                return std::string("Ecco la mia danza del cameriere!");
+            });
+
+        mcp.AddTool("self.robot.bow",
+            "Fai un inchino elegante. Usalo per salutare i clienti o ringraziare per i complimenti.",
+            PropertyList(),
+            [](const PropertyList& props) -> ReturnValue {
+                send_cmd(CMD_BOW);
+                return std::string("Inchino di Enzo, al vostro servizio!");
+            });
+
+        // === ZOD — K230 Vision Navigation Tools ===
+
+        mcp.AddTool("self.robot.navigate",
+            "Navigazione intelligente con visione AI (K230 YOLO). Destinazione: 'table_N' (es. table_3) o 'kitchen'. "
+            "Il robot evita ostacoli autonomamente usando computer vision.",
+            PropertyList({Property("destination", kPropertyTypeString)}),
+            [](const PropertyList& props) -> ReturnValue {
+                K230State snap;
+                portENTER_CRITICAL(&k230_state_mux);
+                snap = k230_state;
+                portEXIT_CRITICAL(&k230_state_mux);
+                if (!snap.connected)
+                    return std::string("K230 non connessa. Uso navigazione manuale.");
+                const std::string& dest = props["destination"].value<std::string>();
+                if (dest.rfind("table_", 0) == 0) {
+                    int t = atoi(dest.c_str() + 6);
+                    send_cmd(CMD_NAV_START, t);
+                    return std::string("Navigazione AI verso tavolo ") + std::to_string(t) + " avviata!";
+                } else if (dest == "kitchen") {
+                    send_cmd(CMD_NAV_START, 0);
+                    return std::string("Navigazione AI verso cucina avviata!");
+                }
+                return std::string("Destinazione non valida. Usa 'table_N' o 'kitchen'.");
+            });
+
+        mcp.AddTool("self.robot.scan",
+            "Scansiona l'ambiente con la camera K230 (YOLO). Rileva persone, tavoli, ostacoli. "
+            "Utile per sapere cosa c'e' intorno prima di muoversi.",
+            PropertyList(),
+            [](const PropertyList& props) -> ReturnValue {
+                K230State snap;
+                portENTER_CRITICAL(&k230_state_mux);
+                snap = k230_state;
+                portEXIT_CRITICAL(&k230_state_mux);
+                if (!snap.connected)
+                    return std::string("K230 non connessa. Scansione non disponibile.");
+                send_cmd(CMD_SCAN);
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                portENTER_CRITICAL(&k230_state_mux);
+                snap = k230_state;
+                portEXIT_CRITICAL(&k230_state_mux);
+                char buf[512];
+                int pos = snprintf(buf, sizeof(buf), "Scansione: %d oggetti. ", snap.num_objects);
+                for (int i = 0; i < snap.num_objects && pos < 480; i++) {
+                    pos += snprintf(buf + pos, sizeof(buf) - pos, "[%s %d%%] ",
+                        snap.objects[i].label, snap.objects[i].confidence);
+                }
+                if (snap.scan_clear_path) pos += snprintf(buf + pos, sizeof(buf) - pos, "Percorso libero.");
+                else pos += snprintf(buf + pos, sizeof(buf) - pos, "Ostacoli nel percorso.");
+                return std::string(buf);
+            });
+
+        mcp.AddTool("self.robot.nav_status",
+            "Stato della navigazione AI: progresso, ostacoli, K230 online/offline.",
+            PropertyList(),
+            [](const PropertyList& props) -> ReturnValue {
+                RobotState rsnap;
+                K230State ksnap;
+                portENTER_CRITICAL(&robot_state_mux);
+                rsnap = robot_state;
+                portEXIT_CRITICAL(&robot_state_mux);
+                portENTER_CRITICAL(&k230_state_mux);
+                ksnap = k230_state;
+                portEXIT_CRITICAL(&k230_state_mux);
+                char buf[300];
+                snprintf(buf, sizeof(buf),
+                    "K230: %s. Navigazione: %s (%d%%). Tavolo: %d. "
+                    "Oggetti rilevati: %d. Ostacolo visivo: %s. "
+                    "Consegne: %d. FW K230: %s",
+                    ksnap.connected ? "online" : "offline",
+                    nav_state_str(rsnap.nav_state), rsnap.nav_progress,
+                    rsnap.current_table,
+                    ksnap.num_objects,
+                    ksnap.vision_obstacle ? "si" : "no",
+                    rsnap.deliveries,
+                    ksnap.firmware_ver[0] ? ksnap.firmware_ver : "n/a");
+                return std::string(buf);
+            });
+
+        mcp.AddTool("self.robot.nav_abort",
+            "Annulla la navigazione in corso. Ferma i motori immediatamente.",
+            PropertyList(),
+            [](const PropertyList& props) -> ReturnValue {
+                send_cmd(CMD_NAV_ABORT);
+                return std::string("Navigazione annullata. Motori fermi.");
+            });
+
+        ESP_LOGI(TAG, "12 MCP tools registrati [ZOD]");
     }
 };
 
