@@ -324,8 +324,14 @@ choice BOARD_TYPE
     config BOARD_TYPE_SKYGUARD_ELITE
         bool "SkyGuard Elite — AI Astronomy Copilot (2.8\" Touch + SQM + GPS)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_SKYGUARD_AI_AGENT
+        bool "SkyGuard AI Agent — Agentic Copilot (skyguardai.xamad.net)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ENZOBOT
         bool "EnzoBot — Robot cameriere AI (OLED + L298N + K230)"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FRIDGESCANNER
+        bool "FridgeScanner — Smart Fridge Inventory AI (Camera + Barcode + Groq Vision)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
         bool "LILYGO T-CameraPlus-S3_V1_0_V1_1"

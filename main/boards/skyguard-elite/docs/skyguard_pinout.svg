@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 850" font-family="monospace" font-size="11">
+  <rect width="1200" height="850" fill="#1a1a2e" rx="8"/>
+  <text x="600" y="28" text-anchor="middle" fill="#55aaff" font-size="16" font-weight="bold">SkyGuard Elite AI — Pinout Completo ESP32-S3 (LCDWiki 2.8")</text>
+  <text x="600" y="46" text-anchor="middle" fill="#556" font-size="10">31 GPIO utilizzati — Tutti i pin mappati con funzione</text>
+
+  <!-- ============ BOARD OUTLINE ============ -->
+  <rect x="350" y="65" width="500" height="640" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+
+  <!-- USB-C connector -->
+  <rect x="540" y="58" width="120" height="18" rx="4" fill="#333" stroke="#555"/>
+  <text x="600" y="71" text-anchor="middle" fill="#aaa" font-size="8">USB-C</text>
+
+  <!-- Display area -->
+  <rect x="400" y="100" width="400" height="230" rx="6" fill="#0a0a2a" stroke="#334" stroke-width="1"/>
+  <text x="600" y="180" text-anchor="middle" fill="#223" font-size="22">ILI9341 TFT</text>
+  <text x="600" y="200" text-anchor="middle" fill="#223" font-size="11">320x240 + FT6336G Touch</text>
+  <text x="600" y="220" text-anchor="middle" fill="#223" font-size="9">Capacitive — swap_xy, mirror_x</text>
+
+  <!-- ESP32-S3 chip -->
+  <rect x="470" y="345" width="260" height="100" rx="6" fill="#1a1a2a" stroke="#445" stroke-width="1"/>
+  <text x="600" y="385" text-anchor="middle" fill="#334" font-size="12">ESP32-S3</text>
+  <text x="600" y="400" text-anchor="middle" fill="#334" font-size="9">N16R8 (16MB Flash, 8MB PSRAM)</text>
+
+  <!-- SD Card slot -->
+  <rect x="470" y="460" width="260" height="40" rx="4" fill="#1a1a10" stroke="#553" stroke-width="1"/>
+  <text x="600" y="484" text-anchor="middle" fill="#553" font-size="9">SD Card (SDIO 4-bit)</text>
+
+  <!-- Speaker + Mic labels on board -->
+  <rect x="380" y="520" width="80" height="35" rx="4" fill="#1a0a0a" stroke="#f44" stroke-width="1"/>
+  <text x="420" y="542" text-anchor="middle" fill="#f44" font-size="8">SPEAKER</text>
+  <rect x="480" y="520" width="80" height="35" rx="4" fill="#1a0a1a" stroke="#f0a" stroke-width="1"/>
+  <text x="520" y="542" text-anchor="middle" fill="#f0a" font-size="8">MEMS MIC</text>
+
+  <!-- JST connectors on bottom -->
+  <rect x="600" y="570" width="60" height="25" rx="3" fill="#1a0a1a" stroke="#c6f" stroke-width="1"/>
+  <text x="630" y="587" text-anchor="middle" fill="#c6f" font-size="7">I2C JST</text>
+  <rect x="680" y="570" width="60" height="25" rx="3" fill="#0a1a1a" stroke="#0cf" stroke-width="1"/>
+  <text x="710" y="587" text-anchor="middle" fill="#0cf" font-size="7">EXP JST</text>
+
+  <!-- Battery -->
+  <rect x="380" y="620" width="100" height="30" rx="4" fill="#1a1a0a" stroke="#880" stroke-width="1"/>
+  <text x="430" y="640" text-anchor="middle" fill="#880" font-size="8">BATTERY</text>
+
+  <!-- RGB LED -->
+  <circle cx="780" y="540" r="10" fill="none" stroke="#0f0" stroke-width="1.5"/>
+  <text x="780" y="543" text-anchor="middle" fill="#0f0" font-size="7">RGB</text>
+
+  <!-- BOOT button -->
+  <rect x="800" y="620" width="35" height="20" rx="3" fill="#222" stroke="#f80" stroke-width="1"/>
+  <text x="817" y="634" text-anchor="middle" fill="#f80" font-size="6">BOOT</text>
+
+  <!-- ============ LEFT SIDE — GPIO LIST ============ -->
+  <g font-size="9">
+    <!-- AUDIO (I2S + PA) — blue -->
+    <rect x="10" y="85" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="95" fill="#48f">GPIO 1</text>  <text x="90" y="95" fill="#68c">PA Control (FM8002E, active LOW)</text>
+    <rect x="10" y="105" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="115" fill="#48f">GPIO 4</text>  <text x="90" y="115" fill="#68c">I2S MCLK (Master Clock)</text>
+    <rect x="10" y="125" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="135" fill="#48f">GPIO 5</text>  <text x="90" y="135" fill="#68c">I2S BCLK (Bit Clock)</text>
+    <rect x="10" y="145" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="155" fill="#48f">GPIO 6</text>  <text x="90" y="155" fill="#68c">I2S DIN (Mic data in)</text>
+    <rect x="10" y="165" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="175" fill="#48f">GPIO 7</text>  <text x="90" y="175" fill="#68c">I2S WS (Word Select / LRCK)</text>
+    <rect x="10" y="185" width="12" height="12" rx="2" fill="#48f"/>  <text x="30" y="195" fill="#48f">GPIO 8</text>  <text x="90" y="195" fill="#68c">I2S DOUT (Speaker data out)</text>
+    <!-- Lines to board -->
+    <line x1="340" y1="91" x2="350" y2="91" stroke="#48f" stroke-width="1.5"/>
+    <line x1="340" y1="111" x2="350" y2="111" stroke="#48f" stroke-width="1.5"/>
+    <line x1="340" y1="131" x2="350" y2="131" stroke="#48f" stroke-width="1.5"/>
+    <line x1="340" y1="151" x2="350" y2="151" stroke="#48f" stroke-width="1.5"/>
+    <line x1="340" y1="171" x2="350" y2="171" stroke="#48f" stroke-width="1.5"/>
+    <line x1="340" y1="191" x2="350" y2="191" stroke="#48f" stroke-width="1.5"/>
+
+    <!-- DISPLAY (SPI) — magenta -->
+    <rect x="10" y="225" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="235" fill="#f0a">GPIO 10</text> <text x="90" y="235" fill="#c8a">SPI CS (Display Chip Select)</text>
+    <rect x="10" y="245" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="255" fill="#f0a">GPIO 11</text> <text x="90" y="255" fill="#c8a">SPI MOSI (Display Data)</text>
+    <rect x="10" y="265" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="275" fill="#f0a">GPIO 12</text> <text x="90" y="275" fill="#c8a">SPI SCLK (Display Clock)</text>
+    <rect x="10" y="285" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="295" fill="#f0a">GPIO 13</text> <text x="90" y="295" fill="#c8a">SPI MISO</text>
+    <rect x="10" y="305" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="315" fill="#f0a">GPIO 45</text> <text x="90" y="315" fill="#c8a">Backlight PWM (LEDC CH0)</text>
+    <rect x="10" y="325" width="12" height="12" rx="2" fill="#f0a"/> <text x="30" y="335" fill="#f0a">GPIO 46</text> <text x="90" y="335" fill="#c8a">DC (Data/Command)</text>
+    <line x1="340" y1="231" x2="350" y2="231" stroke="#f0a" stroke-width="1.5"/>
+    <line x1="340" y1="251" x2="350" y2="251" stroke="#f0a" stroke-width="1.5"/>
+    <line x1="340" y1="271" x2="350" y2="271" stroke="#f0a" stroke-width="1.5"/>
+    <line x1="340" y1="291" x2="350" y2="291" stroke="#f0a" stroke-width="1.5"/>
+    <line x1="340" y1="311" x2="350" y2="311" stroke="#f0a" stroke-width="1.5"/>
+    <line x1="340" y1="331" x2="350" y2="331" stroke="#f0a" stroke-width="1.5"/>
+
+    <!-- TOUCH (I2C_NUM_0) — purple -->
+    <rect x="10" y="365" width="12" height="12" rx="2" fill="#c6f"/> <text x="30" y="375" fill="#c6f">GPIO 15</text> <text x="90" y="375" fill="#96a">I2C_0 SCL (Touch + ES8311)</text>
+    <rect x="10" y="385" width="12" height="12" rx="2" fill="#c6f"/> <text x="30" y="395" fill="#c6f">GPIO 16</text> <text x="90" y="395" fill="#96a">I2C_0 SDA (Touch + ES8311)</text>
+    <rect x="10" y="405" width="12" height="12" rx="2" fill="#c6f"/> <text x="30" y="415" fill="#c6f">GPIO 17</text> <text x="90" y="415" fill="#96a">Touch INT (polling mode)</text>
+    <rect x="10" y="425" width="12" height="12" rx="2" fill="#c6f"/> <text x="30" y="435" fill="#c6f">GPIO 18</text> <text x="90" y="435" fill="#96a">Touch RST (active LOW, 50ms)</text>
+    <line x1="340" y1="371" x2="350" y2="371" stroke="#c6f" stroke-width="1.5"/>
+    <line x1="340" y1="391" x2="350" y2="391" stroke="#c6f" stroke-width="1.5"/>
+    <line x1="340" y1="411" x2="350" y2="411" stroke="#c6f" stroke-width="1.5"/>
+    <line x1="340" y1="431" x2="350" y2="431" stroke="#c6f" stroke-width="1.5"/>
+
+    <!-- SENSORS I2C_NUM_1 — orange/yellow -->
+    <rect x="10" y="465" width="12" height="12" rx="2" fill="#fa0"/> <text x="30" y="475" fill="#fa0">GPIO 14</text> <text x="90" y="475" fill="#ca0">I2C_1 SDA (TSL2591+AS7341+AHT20)</text>
+    <rect x="10" y="485" width="12" height="12" rx="2" fill="#fa0"/> <text x="30" y="495" fill="#fa0">GPIO 21</text> <text x="90" y="495" fill="#ca0">I2C_1 SCL (bus sensori 100kHz)</text>
+    <line x1="340" y1="471" x2="350" y2="471" stroke="#fa0" stroke-width="1.5"/>
+    <line x1="340" y1="491" x2="350" y2="491" stroke="#fa0" stroke-width="1.5"/>
+
+    <!-- GPS UART — green -->
+    <rect x="10" y="525" width="12" height="12" rx="2" fill="#4c4"/> <text x="30" y="535" fill="#4c4">GPIO 2</text>  <text x="90" y="535" fill="#8c8">UART1 RX (da GPS TX) 9600 baud</text>
+    <rect x="10" y="545" width="12" height="12" rx="2" fill="#4c4"/> <text x="30" y="555" fill="#4c4">GPIO 3</text>  <text x="90" y="555" fill="#8c8">UART1 TX (a GPS RX)</text>
+    <line x1="340" y1="531" x2="350" y2="531" stroke="#4c4" stroke-width="1.5"/>
+    <line x1="340" y1="551" x2="350" y2="551" stroke="#4c4" stroke-width="1.5"/>
+
+    <!-- USB SERIAL — grey -->
+    <rect x="10" y="585" width="12" height="12" rx="2" fill="#666"/> <text x="30" y="595" fill="#888">GPIO 43</text> <text x="90" y="595" fill="#666">UART0 TX (USB Serial debug)</text>
+    <rect x="10" y="605" width="12" height="12" rx="2" fill="#666"/> <text x="30" y="615" fill="#888">GPIO 44</text> <text x="90" y="615" fill="#666">UART0 RX (USB Serial debug)</text>
+    <line x1="340" y1="591" x2="350" y2="591" stroke="#666" stroke-width="1"/>
+    <line x1="340" y1="611" x2="350" y2="611" stroke="#666" stroke-width="1"/>
+  </g>
+
+  <!-- ============ RIGHT SIDE — GPIO LIST ============ -->
+  <g font-size="9">
+    <!-- SD CARD (SDIO) — brown/olive -->
+    <rect x="858" y="85" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="95" fill="#a80">GPIO 38</text> <text x="940" y="95" fill="#860">SD CLK</text>
+    <rect x="858" y="105" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="115" fill="#a80">GPIO 39</text> <text x="940" y="115" fill="#860">SD D0</text>
+    <rect x="858" y="125" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="135" fill="#a80">GPIO 40</text> <text x="940" y="135" fill="#860">SD CMD</text>
+    <rect x="858" y="145" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="155" fill="#a80">GPIO 41</text> <text x="940" y="155" fill="#860">SD D1</text>
+    <rect x="858" y="165" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="175" fill="#a80">GPIO 47</text> <text x="940" y="175" fill="#860">SD D3</text>
+    <rect x="858" y="185" width="12" height="12" rx="2" fill="#a80"/> <text x="878" y="195" fill="#a80">GPIO 48</text> <text x="940" y="195" fill="#860">SD D2</text>
+    <line x1="850" y1="91" x2="858" y2="91" stroke="#a80" stroke-width="1.5"/>
+    <line x1="850" y1="111" x2="858" y2="111" stroke="#a80" stroke-width="1.5"/>
+    <line x1="850" y1="131" x2="858" y2="131" stroke="#a80" stroke-width="1.5"/>
+    <line x1="850" y1="151" x2="858" y2="151" stroke="#a80" stroke-width="1.5"/>
+    <line x1="850" y1="171" x2="858" y2="171" stroke="#a80" stroke-width="1.5"/>
+    <line x1="850" y1="191" x2="858" y2="191" stroke="#a80" stroke-width="1.5"/>
+
+    <!-- RGB LED — green -->
+    <rect x="858" y="235" width="12" height="12" rx="2" fill="#0f0"/> <text x="878" y="245" fill="#0f0">GPIO 42</text> <text x="940" y="245" fill="#0a0">WS2812 RGB LED (RMT, 1 LED)</text>
+    <line x1="850" y1="241" x2="858" y2="241" stroke="#0f0" stroke-width="1.5"/>
+
+    <!-- BATTERY — yellow -->
+    <rect x="858" y="275" width="12" height="12" rx="2" fill="#ff0"/> <text x="878" y="285" fill="#ff0">GPIO 9</text>  <text x="940" y="285" fill="#cc0">Battery ADC (voltage sensing)</text>
+    <line x1="850" y1="281" x2="858" y2="281" stroke="#ff0" stroke-width="1.5"/>
+
+    <!-- BOOT — orange -->
+    <rect x="858" y="315" width="12" height="12" rx="2" fill="#f80"/> <text x="878" y="325" fill="#f80">GPIO 0</text>  <text x="940" y="325" fill="#c60">BOOT Button (pull-up)</text>
+    <line x1="850" y1="321" x2="858" y2="321" stroke="#f80" stroke-width="1.5"/>
+
+    <!-- POWER -->
+    <rect x="858" y="365" width="12" height="12" rx="2" fill="#f00"/> <text x="878" y="375" fill="#f00">3V3</text>     <text x="940" y="375" fill="#f88">3.3V regulated output</text>
+    <rect x="858" y="385" width="12" height="12" rx="2" fill="#f00"/> <text x="878" y="395" fill="#f00">5V</text>      <text x="940" y="395" fill="#f88">5V input (USB) / output</text>
+    <rect x="858" y="405" width="12" height="12" rx="2" fill="#444"/> <text x="878" y="415" fill="#888">GND</text>     <text x="940" y="415" fill="#666">Ground (multiple pins)</text>
+  </g>
+
+  <!-- ============ CONNECTORS DETAIL (RIGHT BOTTOM) ============ -->
+  <rect x="858" y="450" width="320" height="120" rx="6" fill="#111" stroke="#c6f" stroke-width="1"/>
+  <text x="1018" y="468" text-anchor="middle" fill="#c6f" font-size="10" font-weight="bold">I2C Connector (JST 1.25mm)</text>
+  <g font-size="9">
+    <text x="875" y="486" fill="#f88">Pin 1: VCC 3.3V</text>
+    <text x="875" y="502" fill="#888">Pin 2: GND</text>
+    <text x="875" y="518" fill="#96a">Pin 3: GPIO15 SCL (I2C_NUM_0)</text>
+    <text x="875" y="534" fill="#96a">Pin 4: GPIO16 SDA (I2C_NUM_0)</text>
+    <text x="875" y="556" fill="#556">Condiviso con Touch + ES8311 on-board</text>
+  </g>
+
+  <rect x="858" y="580" width="320" height="120" rx="6" fill="#111" stroke="#0cf" stroke-width="1"/>
+  <text x="1018" y="598" text-anchor="middle" fill="#0cf" font-size="10" font-weight="bold">EXP Connector (JST 1.25mm)</text>
+  <g font-size="9">
+    <text x="875" y="616" fill="#8c8">Pin 1: GPIO2  (UART1 RX — GPS)</text>
+    <text x="875" y="632" fill="#8c8">Pin 2: GPIO3  (UART1 TX — GPS)</text>
+    <text x="875" y="648" fill="#ca0">Pin 3: GPIO14 (I2C_NUM_1 SDA — sensori)</text>
+    <text x="875" y="664" fill="#ca0">Pin 4: GPIO21 (I2C_NUM_1 SCL — sensori)</text>
+    <text x="875" y="686" fill="#f44">NO VCC/GND! Alimentare da I2C conn</text>
+  </g>
+
+  <!-- ============ LEGEND ============ -->
+  <rect x="30" y="660" width="800" height="170" rx="6" fill="#111122" stroke="#334" stroke-width="1"/>
+  <text x="430" y="682" text-anchor="middle" fill="#ff6" font-size="12" font-weight="bold">Legenda — 31 GPIO utilizzati</text>
+  <g font-size="9">
+    <!-- Row 1 -->
+    <rect x="50" y="695" width="10" height="10" fill="#48f"/>  <text x="67" y="704" fill="#68c">Audio I2S + PA (6 pin): GPIO 1,4,5,6,7,8</text>
+    <rect x="50" y="713" width="10" height="10" fill="#f0a"/>  <text x="67" y="722" fill="#c8a">Display SPI (6 pin): GPIO 10,11,12,13,45,46</text>
+    <rect x="50" y="731" width="10" height="10" fill="#c6f"/>  <text x="67" y="740" fill="#96a">Touch I2C_0 (4 pin): GPIO 15,16,17,18</text>
+    <rect x="50" y="749" width="10" height="10" fill="#fa0"/>  <text x="67" y="758" fill="#ca0">Sensori I2C_1 (2 pin): GPIO 14,21</text>
+    <rect x="50" y="767" width="10" height="10" fill="#4c4"/>  <text x="67" y="776" fill="#8c8">GPS UART1 (2 pin): GPIO 2,3</text>
+
+    <!-- Row 2 -->
+    <rect x="400" y="695" width="10" height="10" fill="#a80"/>  <text x="417" y="704" fill="#860">SD Card SDIO (6 pin): GPIO 38,39,40,41,47,48</text>
+    <rect x="400" y="713" width="10" height="10" fill="#0f0"/>  <text x="417" y="722" fill="#0a0">RGB LED WS2812 (1 pin): GPIO 42</text>
+    <rect x="400" y="731" width="10" height="10" fill="#ff0"/>  <text x="417" y="740" fill="#cc0">Battery ADC (1 pin): GPIO 9</text>
+    <rect x="400" y="749" width="10" height="10" fill="#f80"/>  <text x="417" y="758" fill="#c60">BOOT Button (1 pin): GPIO 0</text>
+    <rect x="400" y="767" width="10" height="10" fill="#666"/>  <text x="417" y="776" fill="#888">USB Serial (2 pin): GPIO 43,44</text>
+
+    <!-- Totals -->
+    <text x="50" y="806" fill="#aaa">Totale: 6+6+4+2+2+6+1+1+1+2 = 31 GPIO mappati</text>
+    <text x="50" y="822" fill="#f33">I2C_NUM_0 (400kHz): FT6336G(0x38) + ES8311(0x18) — on-board only</text>
+    <text x="500" y="822" fill="#f33">I2C_NUM_1 (100kHz): TSL2591(0x29) + AS7341(0x39) + AHT20(0x38) — esterno</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="600" y="845" text-anchor="middle" fill="#556" font-size="9">SkyGuard Elite AI — xamad/aiChatbot — 2026</text>
+</svg>
